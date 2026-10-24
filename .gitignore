@@ -25,3 +25,6 @@ build-*/
 # local scratch
 *.tmp
 .sb-*
+backend/supabase/
+.sb-secrets.tmp
+*leaks*.txt
