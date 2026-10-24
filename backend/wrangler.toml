@@ -1,7 +1,7 @@
 # ClipLink backend configuration.
 # All tunable limits live here [vars] — nothing is hard-coded in the source.
 
-name = "cliplink-backend"
+name = "api"
 main = "src/index.js"
 compatibility_date = "2025-09-01"
 

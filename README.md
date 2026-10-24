@@ -6,7 +6,11 @@ ClipLink is a macOS menu-bar app + serverless backend. When you copy a file
 (`⌘C` in Finder), ClipLink quietly uploads it and replaces the clipboard
 content with a public, expiring download URL — so the next `⌘V` pastes the
 link, not the file. Nothing sensitive is embedded in the app; the whole
-backend runs free-tier on Cloudflare.
+backend runs free-tier on Cloudflare + Supabase with zero payment cards.
+
+The shared hosted instance runs at **`https://api.cliplink.workers.dev`**
+(preconfigured in the released app). Everything can also be self-hosted —
+see *Deploy* below.
 
 ## Features
 

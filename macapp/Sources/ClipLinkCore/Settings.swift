@@ -4,7 +4,7 @@ import Foundation
 /// Nothing in here is ever a secret: the backend URL is public configuration
 /// and the install id is only a rate-limiting hint (PRD §7).
 public final class Settings: @unchecked Sendable {
-    public static let defaultBackendString = "https://cliplink-backend.cliplink-backend.workers.dev"
+    public static let defaultBackendString = "https://api.cliplink.workers.dev"
 
     private let d: UserDefaults
 
