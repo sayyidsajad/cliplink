@@ -12,11 +12,14 @@ hours US).
 - [x] Landing site live with OG image, canonical, sitemap, robots.txt, JSON-LD
 - [x] GitHub repo: description, homepage link, 13 search topics, MIT licence
 - [x] Releases auto-built by CI; app installable in 2 clicks
+- [x] Discussions enabled; pinned "community roadmap" issue live (gh)
+- [x] IndexNow key hosted on the site; URLs submitted directly to
+      api.indexnow.org (HTTP 202) — Bing/Yandex/Seznam begin crawling
 - [ ] **You:** upload the social preview image — repo → ⚙ Settings → Social
   preview → drag `og.png` (from the website repo) into both repos.
-- [ ] **You (optional):** record a 30-second demo GIF/video: click ⌘C in
-  Finder → toast → paste link in a browser. Phone screen-record or
-  `⌘⇧5` + ScreenToGif-class tooling. This asset *doubles* click-through.
+- [ ] **You:** pin `cliplink` + `cliplink-website` on your profile (no API).
+- [ ] **You (optional):** record a 30-second demo GIF using
+  [`DEMO-SCRIPT.md`](DEMO-SCRIPT.md). This asset *doubles* click-through.
 
 ## Phase 1 — search engines (quiet, compound interest)
 
@@ -88,23 +91,25 @@ everyone for the first ~8 h, disclose that you are the maker.
 
 ## Phase 4 — directories & listings (slow burn, do once)
 
-| Channel | Action |
-|---|---|
-| AlternativeTo | add program "ClipLink" (free) — becomes the search-ready profile for "upload/One-Time File Sharing"- queries |
-| MacUpdate / Softpedia | submit app listing (both accept free submissions) |
-| Slant / Alternativeto.net comments | list as alternative to WeTransfer/cloudapp/Dropbox-links |
-| GitHub Marketplace? | not applicable — skip |
-| Your own channels | X/Mastodon/LinkedIn one thread + link in bio |
+| Channel | Direct link (free) | Action |
+|---|---|---|
+| AlternativeTo | alternative.me → "Add Software" | search ClipLink first; if absent create entry "ClipLink — copy files → self-destructing share links" and list as alternative to WeTransfer / Dropmark / CloudApp |
+| MacUpdate | macupdate.com → submit (footer → "Submit Software") | attach og.png + demo GIF |
+| Softpedia | softpedia.com → "Submit a free app" | mark freeware; MIT |
+| Slant.co | "Alternatives to WeTransfer" question | short answer, first line = one-sentence value, then link |
+| BetaList / Indie Hackers | poststory + milestone post | optional; pick one |
+| X / Mastodon / LinkedIn | thread: 1 problem → 1 demo GIF → 1 link → 1 honesty note ("no trackers by design") | pin the thread |
 
 ## Phase 5 — evergreen compounding
 
 - Release notes post per version (releases page); each release GitHub pushes
   to follower feeds.
-- Blog-size README `docs/DESIGN.md` exists — link "how it works" from the
-  site: curiosity-driven backlinks.
-- Keep answering issue/PRs publicly; high-quality open-source activity is
-  itself indexed content.
-- Submit the *backend* to awesome-selfhosted once self-host docs mature.
+- Record the demo clip using [`DEMO-SCRIPT.md`](DEMO-SCRIPT.md) — GIF in
+  README + post assets.
+- "How it works" curiosity content: `docs/DESIGN.md` already exists; consider
+  a 1-page "the two-file backend explained" post linked from the website later.
+- Keep answering issues/PRs publicly; activity itself is indexed content.
+- Self-hosted backend mature enough → PR to awesome-selfhosted.
 
 ---
 
