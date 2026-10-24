@@ -63,8 +63,13 @@ function readConfig(env) {
   const minutes = (env.EXPIRY_MINUTES !== undefined && env.EXPIRY_MINUTES !== "")
     ? num(env.EXPIRY_MINUTES, hours * 60)
     : hours * 60;
+  // Storage budget against the R2 free tier. 0 disables the guard.
+  const maxStorageGB = env.MAX_STORAGE_GB !== undefined && env.MAX_STORAGE_GB !== ""
+    ? Math.max(0, Number.parseFloat(env.MAX_STORAGE_GB) || 0)
+    : 9;
   return {
     maxFileBytes: Math.round(num(env.MAX_FILE_MB, 100) * 1024 * 1024),
+    maxStorageBytes: Math.round(maxStorageGB * 1024 * 1024 * 1024),
     expiryMs: Math.round(minutes * 60 * 1000),
     rateLimitUploads: Math.round(num(env.RATE_LIMIT_UPLOADS, 30)),
     rateWindowMs: Math.round(num(env.RATE_WINDOW_MINUTES, 60) * 60 * 1000),
@@ -145,6 +150,51 @@ async function deleteObjectQuietly(env, key) {
   try { await env.BUCKET.delete(key); } catch { /* best-effort */ }
 }
 
+// Bytes currently held in R2 by live (not yet deleted) share rows.
+async function liveStorageBytes(env) {
+  const row = await env.DB.prepare(
+    "SELECT COALESCE(SUM(size), 0) AS b FROM shares WHERE object_deleted = 0"
+  ).first("b");
+  return Number(row ?? 0);
+}
+
+const STORAGE_RETRY_AFTER = "600"; // cron runs every 10 minutes
+
+function throwStorageFull() {
+  throw new ApiError(
+    507,
+    "storage_full",
+    "Server storage is full. Space frees automatically as older links expire — try again in a few minutes.",
+    { "Retry-After": STORAGE_RETRY_AFTER }
+  );
+}
+
+// Last-resort self-healing: if storage is over budget, force-delete the oldest
+// live objects (their links become 410 "no longer available") until we are back
+// under budget. Keeps the deployment inside the R2 free tier without billing.
+async function enforceStorageBudget(env, cfg, now) {
+  if (cfg.maxStorageBytes <= 0) return 0;
+  let usage = await liveStorageBytes(env);
+  if (usage <= cfg.maxStorageBytes) return 0;
+  let freed = 0;
+  while (usage - freed > cfg.maxStorageBytes) {
+    const oldest = await env.DB.prepare(
+      "SELECT token, object_key, size FROM shares WHERE object_deleted = 0 ORDER BY created_at ASC, token ASC LIMIT 50"
+    ).all();
+    const rows = oldest.results || [];
+    if (rows.length === 0) break;
+    for (const r of rows) {
+      await deleteObjectQuietly(env, r.object_key);
+      await env.DB.prepare(
+        "UPDATE shares SET object_deleted = 1, deleted_at = ?2 WHERE token = ?1"
+      ).bind(r.token, now).run();
+      freed += Number(r.size) || 0;
+      if (usage - freed <= cfg.maxStorageBytes) return freed;
+    }
+  }
+  return freed;
+}
+
 function errorFor(e, apiPath) {
   if (e instanceof ApiError) {
     return apiPath
@@ -198,6 +248,13 @@ async function handleUpload(request, env, cfg, ctx) {
   if (!(await allowUpload(env, cfg, install, ip, now))) {
     const retryAfter = Math.max(1, Math.ceil(cfg.rateWindowMs / 1000));
     throw new ApiError(429, "rate_limited", "Upload rate limit reached. Try again later.", { "Retry-After": String(retryAfter) });
+  }
+
+  // Storage budget: never accept an upload that would push total stored bytes
+  // past the configured budget (507 instead of silently exceeding the free tier).
+  if (cfg.maxStorageBytes > 0) {
+    const usage = await liveStorageBytes(env);
+    if (usage + rawLength > cfg.maxStorageBytes) throwStorageFull();
   }
 
   const filename = sanitizeFilename(decodeURIComponentSafe(request.headers.get("X-ClipLink-Filename") || ""));
@@ -269,13 +326,14 @@ async function shareStatus(env, token) {
   return row;
 }
 
-function handleLimits(cfg) {
+function handleLimits(cfg, env) {
   return json({
     maxFileBytes: cfg.maxFileBytes,
     maxFileMB: Math.floor(cfg.maxFileBytes / (1024 * 1024)),
     expiryHours: +(cfg.expiryMs / 3600000).toFixed(4),
     rateLimitUploads: cfg.rateLimitUploads,
     rateWindowMinutes: Math.round(cfg.rateWindowMs / 60000),
+    storageBudgetBytes: cfg.maxStorageBytes,
   });
 }
 
@@ -380,7 +438,7 @@ export default {
         return json({ ok: true, service: "cliplink", time: Date.now() });
       }
       if (path === "/api/v1/limits" && request.method === "GET") {
-        return handleLimits(cfg);
+        return handleLimits(cfg, env);
       }
       if (path === "/api/v1/shares") {
         if (request.method !== "POST") {
@@ -418,7 +476,9 @@ export default {
 
   async scheduled(event, env, ctx) {
     const cfg = readConfig(env);
+    const now = Date.now();
     const deleted = await cleanupExpired(env, cfg);
-    console.log(`cliplink cleanup: expired objects deleted: ${deleted}`);
+    const evicted = await enforceStorageBudget(env, cfg, now);
+    console.log(`cliplink cleanup: expired objects deleted: ${deleted}; evicted by storage budget: ${evicted}`);
   },
 };

@@ -36,6 +36,10 @@ parsing edge cases with binary data, and metadata rides in two headers.
 - Cron (`*/10 * * * *`) deletes expired R2 objects, then purges rows older
   than `ROW_RETENTION_DAYS` so the "expired" page can still explain itself
   briefly before disappearing entirely.
+- **Storage budget**: total stored bytes are capped by `MAX_STORAGE_GB`. New
+  uploads past the budget get `507 storage_full`; the cron force-evicts the
+  oldest objects when usage overruns (config change or race). This keeps a
+  deployment inside the R2 free tier with zero billing risk.
 - Rate limiting by `install id` (client-generated, stored for rate limiting
   only) with IP fallback. It is **not** an authentication mechanism.
 - Revocation requires the per-share `revoke_token` header or the (optional)

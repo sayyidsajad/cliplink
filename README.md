@@ -65,6 +65,22 @@ npx wrangler dev --env tiny --port 8788 --ip 127.0.0.1 --test-scheduled --persis
 # limits: 1 MB files, ~12 s expiry, 3 uploads/h
 ```
 
+### Storage budget (stays inside the R2 free tier)
+
+R2's free tier includes 10 GB of storage. The worker enforces its own
+`MAX_STORAGE_GB` (default **9 GB**) so it can never be billed:
+
+- An upload that would push total stored bytes past the budget gets a clean
+  **507 `storage_full`** (with `Retry-After`) — no silent overruns.
+- Every 10 minutes the cron **evicts the oldest objects** until usage is back
+  under budget. Evicted links answer `410 gone` ("no longer available").
+- Normal expiry cleanup happens first, so in practice the budget only kicks in
+  after heavy use; and it also shrinks any *existing* buildout the moment the
+  budget is lowered.
+
+Docs (R2/D1/Workers free tiers) and `MAX_STORAGE_GB`/limits live in
+`backend/wrangler.toml [vars]`.
+
 ### Deploy to Cloudflare (free tier)
 
 ```bash

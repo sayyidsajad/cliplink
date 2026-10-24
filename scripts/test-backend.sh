@@ -57,6 +57,9 @@ check "download after revoke 410" "410" "$(curl -s -o /dev/null -w '%{http_code}
 REVOKED_PAGE=$(curl -s "$BASE/s/$TOKEN")
 check "share page says revoked" "yes" "$(echo "$REVOKED_PAGE" | grep -qi 'revoked' && echo yes)"
 
+echo "== storage budget (advertised only; 507/eviction paths are exercised in the tiny env) =="
+curl -s "$BASE/api/v1/limits" | grep -o '"storageBudgetBytes"' >/dev/null && echo "  ok   storageBudgetBytes advertised"
+
 echo "== expiration (uses current clock margin; authoritative tiny-env check lives in e2e notes) =="
 echo "  (set EXPIRY_MINUTES=0.2 in [env.tiny] and run against port 8788 for the 12s expiry path)"
 

@@ -13,8 +13,8 @@ bucket_name = "cliplink-uploads"
 [[d1_databases]]
 binding = "DB"
 database_name = "cliplink"
-# Replace with the real id printed by `wrangler d1 create cliplink` before deploying.
-database_id = "00000000-0000-0000-0000-000000000000"
+# Printed by `wrangler d1 create cliplink`.
+database_id = "f314890a-fdfe-492c-9678-e1796d75bdd9"
 
 # ---- scheduled cleanup of expired objects ----
 [triggers]
@@ -28,16 +28,18 @@ EXPIRY_HOURS = "24"          # link lifetime (integer hours)
 RATE_LIMIT_UPLOADS = "30"    # uploads per identity per window
 RATE_WINDOW_MINUTES = "60"   # rate-limit window
 ROW_RETENTION_DAYS = "7"     # keep expired metadata rows this long for "expired" pages, then purge
+MAX_STORAGE_GB = "9"         # hard ceiling on total stored bytes; oldest objects evicted past it (R2 free tier is 10 GB)
 PUBLIC_BASE_URL = ""         # leave empty to derive the public origin from the request
 
 # ---- test environment: tiny limits so expiry/rate/size paths are exercisable locally ----
 [env.tiny.vars]
 MAX_FILE_MB = "1"
 EXPIRY_HOURS = "24"
-EXPIRY_MINUTES = "0.2"       # ~12 seconds
+EXPIRY_MINUTES = "0.2"
 RATE_LIMIT_UPLOADS = "3"
 RATE_WINDOW_MINUTES = "60"
 ROW_RETENTION_DAYS = "7"
+MAX_STORAGE_GB = "0.01"      # tiny budget so the budget paths are exercisable locally
 PUBLIC_BASE_URL = ""
 
 [[env.tiny.r2_buckets]]
@@ -47,7 +49,8 @@ bucket_name = "cliplink-uploads"
 [[env.tiny.d1_databases]]
 binding = "DB"
 database_name = "cliplink"
-database_id = "00000000-0000-0000-0000-000000000000"
+# Printed by `wrangler d1 create cliplink`.
+database_id = "f314890a-fdfe-492c-9678-e1796d75bdd9"
 
 [env.tiny.triggers]
 crons = ["*/10 * * * *"]
