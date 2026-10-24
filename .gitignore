@@ -21,3 +21,7 @@ backend/.state02/
 
 # E2E scratch files
 build-*/
+
+# local scratch
+*.tmp
+.sb-*

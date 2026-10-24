@@ -41,16 +41,24 @@ class ApiError extends Error {
   }
 }
 
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "no-referrer",
+  "content-security-policy":
+    "default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; script-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+};
+
 const json = (data, status = 200, headers = {}) =>
   new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", ...headers },
+    headers: { "content-type": "application/json; charset=utf-8", ...SECURITY_HEADERS, ...headers },
   });
 
 const html = (body, status = 200) =>
   new Response(body, {
     status,
-    headers: { "content-type": "text/html; charset=utf-8", "x-content-type-options": "nosniff" },
+    headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS },
   });
 
 // ---------------------------------------------------------------- config
@@ -148,10 +156,10 @@ function publicOrigin(cfg, request) {
 }
 
 async function deleteObjectQuietly(env, key) {
-  try { await makeStorage(env).delete(key); } catch { /* best-effort (double-guarded in supabase.js) */ }
+  try { return await makeStorage(env).delete(key); } catch { return false; } // best-effort
 }
 
-// Bytes currently held in R2 by live (not yet deleted) share rows.
+// Bytes currently held by live (not yet deleted) share rows.
 async function liveStorageBytes(env) {
   const row = await env.DB.prepare(
     "SELECT COALESCE(SUM(size), 0) AS b FROM shares WHERE object_deleted = 0"
@@ -184,14 +192,20 @@ async function enforceStorageBudget(env, cfg, now) {
     ).all();
     const rows = oldest.results || [];
     if (rows.length === 0) break;
+    const before = freed;
     for (const r of rows) {
-      await deleteObjectQuietly(env, r.object_key);
-      await env.DB.prepare(
-        "UPDATE shares SET object_deleted = 1, deleted_at = ?2 WHERE token = ?1"
-      ).bind(r.token, now).run();
-      freed += Number(r.size) || 0;
+      // Mark the row only after a successful blob delete: a failed delete must
+      // stay counted in the budget (and be retried next cron), never orphaned.
+      const gone = await deleteObjectQuietly(env, r.object_key);
+      if (gone) {
+        await env.DB.prepare(
+          "UPDATE shares SET object_deleted = 1, deleted_at = ?2 WHERE token = ?1"
+        ).bind(r.token, now).run();
+        freed += Number(r.size) || 0;
+      }
       if (usage - freed <= cfg.maxStorageBytes) return freed;
     }
+    if (freed === before) break; // storage failures: retry next cron, don't spin
   }
   return freed;
 }
@@ -405,10 +419,23 @@ async function handleRevoke(request, env, token) {
 
   const now = Date.now();
   if (!row.revoked && !row.object_deleted) {
-    await makeStorage(env).delete(row.object_key);
+    // Revocation is always effective immediately because shareStatus() refuses
+    // revoked shares regardless of the object. The blob deletion is what we
+    // mark object_deleted for — retry via cron if storage was not reachable.
+    const gone = await makeStorage(env).delete(row.object_key);
+    if (gone) {
+      await env.DB.prepare(
+        "UPDATE shares SET revoked = 1, object_deleted = 1, deleted_at = ?2 WHERE token = ?1"
+      ).bind(token, now).run();
+    } else {
+      await env.DB.prepare(
+        "UPDATE shares SET revoked = 1, deleted_at = ?2 WHERE token = ?1"
+      ).bind(token, now).run();
+    }
+  } else if (!row.revoked) {
     await env.DB.prepare(
-      "UPDATE shares SET revoked = 1, object_deleted = 1, deleted_at = ?2 WHERE token = ?1"
-    ).bind(token, now).run();
+      "UPDATE shares SET revoked = 1 WHERE token = ?1"
+    ).bind(token).run();
   }
   return json({ ok: true, token, revoked: true });
 }
@@ -418,15 +445,25 @@ async function cleanupExpired(env, cfg) {
   const expired = await env.DB.prepare(
     "SELECT token, object_key FROM shares WHERE expires_at < ?1 AND object_deleted = 0 LIMIT 200"
   ).bind(now).all();
+  let deleted = 0;
   for (const r of expired.results || []) {
-    await deleteObjectQuietly(env, r.object_key);
-    await env.DB.prepare(
-      "UPDATE shares SET object_deleted = 1, deleted_at = ?2 WHERE token = ?1"
-    ).bind(r.token, now).run();
+    // Only mark when the blob is really gone: failed deletes stay counted in
+    // the storage budget and are retried by the next cron run.
+    const gone = await deleteObjectQuietly(env, r.object_key);
+    if (gone) {
+      await env.DB.prepare(
+        "UPDATE shares SET object_deleted = 1, deleted_at = ?2 WHERE token = ?1"
+      ).bind(r.token, now).run();
+      deleted++;
+    }
   }
-  // Purge old metadata rows entirely; further requests become plain 404s.
-  await env.DB.prepare("DELETE FROM shares WHERE expires_at < ?1").bind(now - cfg.retentionMs).run();
-  return (expired.results || []).length;
+  // Purge old metadata rows entirely — but only once their blob was handled
+  // (object_deleted=1). If a blob still exists, keep the row so the cron keeps
+  // trying; further requests become plain 404s.
+  await env.DB.prepare(
+    "DELETE FROM shares WHERE expires_at < ?1 AND object_deleted = 1"
+  ).bind(now - cfg.retentionMs).run();
+  return deleted;
 }
 
 // ---------------------------------------------------------------- router

@@ -67,9 +67,12 @@ export function makeStorage(env) {
       return { size: expectedSize };
     },
 
-    /** Best-effort delete; missing objects must not throw. */
+    /** Best-effort delete; returns true when the object is actually gone (or was already). */
     async delete(key) {
-      try { await api(cfg, obj(key), { method: "DELETE" }); } catch { /* best-effort */ }
+      try {
+        const res = await api(cfg, obj(key), { method: "DELETE" });
+        return res.status === 200 || res.status === 404;
+      } catch { return false; }
     },
 
     /**
@@ -104,12 +107,15 @@ export function makeStorage(env) {
 }
 
 /**
- * Tiny keepalive: Supabase pauses free projects after ~7 days of inactivity,
- * which would silently break uploads. One cheap REST call inside the cron
- * (every 10 min) keeps the project awake.
+ * Keepalive: Supabase pauses free projects after ~7 days of inactivity, which
+ * would silently break uploads. Called from the cron (every 10 min).
+ * Uses GoTrue's health endpoint (auth header only); falls back to a PostgREST
+ * probe of the shares table.
  */
 export async function storageKeepAlive(env) {
   const cfg = storageConfig(env);
+  const ping = await fetch(`${cfg.url}/auth/v1/health`, { headers: { apikey: cfg.key } });
+  if (ping.ok) return ping.status;
   const res = await fetch(`${cfg.url}/rest/v1/shares?select=token&limit=1`, {
     headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}` },
   });
