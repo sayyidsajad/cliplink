@@ -202,7 +202,9 @@ Documents that govern the **hosted service** (the code is MIT; the hosted
 | Privacy Policy (data-minimal, DPDP-aware) | <https://sayyidsajad.github.io/cliplink-website/privacy.html> |
 | Security policy & vulnerability reporting | [`SECURITY.md`](SECURITY.md) |
 | Legal & operations runbook (takedowns, CERT-In, kill switch, residual-risk log) | [`docs/LEGAL-RUNBOOK.md`](docs/LEGAL-RUNBOOK.md) |
-| Abuse reports | [GitHub issue — abuse template](https://github.com/sayyidsajad/cliplink/issues/new?template=abuse-report.md) |
+| DMCA agent registration walkthrough | [`docs/DMCA-REGISTRATION.md`](docs/DMCA-REGISTRATION.md) |
+| Lawyer-review brief (10-point question list) | [`docs/LAWYER-BRIEF.md`](docs/LAWYER-BRIEF.md) |
+| Abuse reports | e-mail **sayyidsajada4s@gmail.com** or the [abuse template](https://github.com/sayyidsajad/cliplink/issues/new?template=abuse-report.md) |
 
 Surface points for these documents:
 

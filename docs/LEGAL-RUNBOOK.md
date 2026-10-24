@@ -65,9 +65,7 @@ incomplete notices, but note them. On a complete valid notice: revoke per §1,
 record both the notice and your response, and consider the "repeat infringer"
 stance documented in the Terms (removal on each valid notice; the built-in
 rate-limit and 7-day retention already suppress large-scale repeaters).
-Counter-notices: as sole operator you are currently *not* filing a DMCA agent
-registration (see §7 user actions) — treat this procedure as good-faith
-compliance, not statutory DMCA process.
+Counter-notices: a designated DMCA agent registration is being filed (walkthrough: [`docs/DMCA-REGISTRATION.md`](DMCA-REGISTRATION.md)); until the filing lands in the public directory, treat the notice procedure as good-faith compliance, not statutory DMCA process.
 
 ## 3. India-specific duties
 
@@ -117,16 +115,25 @@ practical protection available.
 
 ## 7. Residual risks & operator action items
 
-**User (maintainer) actions remaining:**
-- [ ] Create a real report mailbox (e.g. `abuse@<domain>`) and update the
-      Terms/Privacy/SECURITY/issue templates to use it.
-- [ ] Register a DMCA agent with the U.S. Copyright Office (free,
-      https://www.copyright.gov/dmca-agent/) if U.S. reach matters to you.
-- [ ] Confirm a governing-law city for Terms §10 (the `[CITY]` placeholder
-      must be filled before relying on the clause).
-- [ ] Consider a lawyer review of the Terms/Privacy before heavy publicity.
-- [ ] Consider incorporation and/or tech-liability insurance if the service
-      grows beyond a hobby footprint.
+**Done (2026-10-24):**
+- [x] Public report mailbox published: `sayyidsajada4s@gmail.com`
+      (Terms §4/§11, Privacy §10, SECURITY.md, issue template).
+- [x] DMCA registration prepared (field-by-field walkthrough:
+      [`DMCA-REGISTRATION.md`](DMCA-REGISTRATION.md)) — filing itself requires
+      the maintainer's Login.gov sign-in.
+- [x] Governing-law venue resolved without exposing a city: "competent courts
+      at the Operator's place of residence in India" (Terms §10).
+- [x] Lawyer-review pack prepared: [`LAWYER-BRIEF.md`](LAWYER-BRIEF.md)
+      (10-point question list; sign-off template at the end).
+
+**Maintainer actions remaining:**
+- [ ] Verify `sayyidsajada4s@gmail.com` actually receives mail and you can
+      respond within 24 h (it is now the published grievance channel).
+- [ ] File the DMCA agent registration (10 min, $6; see walkthrough).
+- [ ] Get a one-hour lawyer review using `LAWYER-BRIEF.md` before heavy
+      publicity.
+- [ ] Consider incorporation (One Person Company / LLP) and/or tech-liability
+      insurance if the service grows beyond a hobby footprint.
 
 **Structural (accepted, mitigated) risks:**
 - Anonymous uploads means malware/phishing can be shared by bad actors between

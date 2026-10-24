@@ -4,8 +4,10 @@
 
 Please open a [security advisory](https://github.com/sayyidsajad/cliplink/security/advisories/new)
 or a [normal issue](https://github.com/sayyidsajad/cliplink/issues/new?template=abuse-report.md)
-for abuse reports (illegal content, privacy, takedowns). Operating procedures:
-see [docs/LEGAL-RUNBOOK.md](docs/LEGAL-RUNBOOK.md).
+for abuse reports (illegal content, privacy, takedowns). Preferable for
+sensitive/urgent matters: e-mail **`sayyidsajada4s@gmail.com`** (public report
+mailbox and grievance contact under India's IT Rules 2021). Operating
+procedures: see [docs/LEGAL-RUNBOOK.md](docs/LEGAL-RUNBOOK.md).
 
 ## Supported versions
 

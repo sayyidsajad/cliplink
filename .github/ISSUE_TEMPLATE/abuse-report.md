@@ -11,8 +11,10 @@ assignees: ''
      the official channel for abuse reports, takedown requests (including
      copyright/DMCA-style notices), grant-of-privacy requests, and grievances
      under India's IT Rules, 2021. Target: acknowledgement within 24 h,
-     action within 72 h. The maintainer may move sensitive reports out of the
-     public issue tracker — do NOT include personal data of victims here. -->
+     action within 72 h. Prefer e-mail for sensitive/urgent matters:
+     sayyidsajada4s@gmail.com — do NOT include personal data of victims here. -->
+
+> E-mail alternative: **sayyidsajada4s@gmail.com**
 
 **Report type** (choose one):
 - [ ] Illegal content (explain the law broken)
