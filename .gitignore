@@ -1,0 +1,23 @@
+# Builds & packaging
+build/
+macapp/.build/
+*.dmg
+
+# SwiftPM
+*.xcodeproj
+
+# Backend tooling & local state
+backend/node_modules/
+backend/.wrangler/
+backend/.dev.vars
+backend/.state02/
+
+# Local dev logs
+.wrangler-dev*.log
+.bundled-e2e.log
+
+# OS cruft
+.DS_Store
+
+# E2E scratch files
+build-*/

@@ -1,0 +1,53 @@
+# ClipLink backend configuration.
+# All tunable limits live here [vars] — nothing is hard-coded in the source.
+
+name = "cliplink-backend"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# ---- storage ----
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "cliplink-uploads"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cliplink"
+# Replace with the real id printed by `wrangler d1 create cliplink` before deploying.
+database_id = "00000000-0000-0000-0000-000000000000"
+
+# ---- scheduled cleanup of expired objects ----
+[triggers]
+crons = ["*/10 * * * *"]
+
+# ---- limits (server-enforced; the Mac app treats them as advisory) ----
+[vars]
+MAX_FILE_MB = "100"          # max upload size per file
+EXPIRY_HOURS = "24"          # link lifetime (integer hours)
+# EXPIRY_MINUTES overrides EXPIRY_HOURS when set (used by tests)
+RATE_LIMIT_UPLOADS = "30"    # uploads per identity per window
+RATE_WINDOW_MINUTES = "60"   # rate-limit window
+ROW_RETENTION_DAYS = "7"     # keep expired metadata rows this long for "expired" pages, then purge
+PUBLIC_BASE_URL = ""         # leave empty to derive the public origin from the request
+
+# ---- test environment: tiny limits so expiry/rate/size paths are exercisable locally ----
+[env.tiny.vars]
+MAX_FILE_MB = "1"
+EXPIRY_HOURS = "24"
+EXPIRY_MINUTES = "0.2"       # ~12 seconds
+RATE_LIMIT_UPLOADS = "3"
+RATE_WINDOW_MINUTES = "60"
+ROW_RETENTION_DAYS = "7"
+PUBLIC_BASE_URL = ""
+
+[[env.tiny.r2_buckets]]
+binding = "BUCKET"
+bucket_name = "cliplink-uploads"
+
+[[env.tiny.d1_databases]]
+binding = "DB"
+database_name = "cliplink"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[env.tiny.triggers]
+crons = ["*/10 * * * *"]
