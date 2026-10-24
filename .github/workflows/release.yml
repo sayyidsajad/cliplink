@@ -1,0 +1,49 @@
+# Builds and attaches the ClipLink DMG on every version tag (vX.Y.Z).
+# Can also be dispatched manually — then it only verifies the build works
+# on a fresh macOS runner and does NOT create a release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-ci" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build app bundle + DMG
+        run: |
+          bash scripts/make-app.sh "build/ClipLink.app"
+          bash scripts/make-dmg.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Smoke-check the DMG
+        run: |
+          ls -la "build/ClipLink-${{ steps.ver.outputs.version }}.dmg"
+          codesign -dv build/ClipLink.app 2>&1 | head -3
+
+      - name: Create/release upload (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          gh release create "$GITHUB_REF_NAME" \
+            "build/ClipLink-$VER.dmg" \
+            --title "ClipLink $VER" \
+            --generate-notes \
+          || gh release upload "$GITHUB_REF_NAME" "build/ClipLink-$VER.dmg" --clobber

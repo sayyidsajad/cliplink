@@ -1,0 +1,20 @@
+# Keeps main green: builds the Swift app and syntax-checks the Worker.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Swift package (debug)
+        run: swift build --package-path macapp
+
+      - name: Worker syntax check
+        run: node --check backend/src/index.js && node --check backend/src/supabase.js && node --check backend/src/page.js
