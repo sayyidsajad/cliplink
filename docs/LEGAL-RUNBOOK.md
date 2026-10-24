@@ -1,0 +1,142 @@
+# Legal & Operations Runbook
+
+Practical procedures for operating the hosted ClipLink service responsibly.
+This is the maintainer's playbook — not legal advice.
+
+Related reading: website [Terms](https://sayyidsajad.github.io/cliplink-website/terms.html) ·
+[Privacy Policy](https://sayyidsajad.github.io/cliplink-website/privacy.html) ·
+[SECURITY.md](../SECURITY.md) · [LICENSE](../LICENSE) (MIT).
+
+---
+
+## 0. The core legal posture
+
+- The **code** is MIT-licensed: users, not the operator, bear most software risk.
+  The LICENSE states **no warranty** and caps liability — keep those clauses intact.
+- The **hosted service** (`api.cliplink.workers.dev`) is the real exposure: the
+  operator is an Indian individual acting as an *intermediary* under the
+  [IT Act, 2000](https://www.indiacode.nic.in/) and the **IT Rules, 2021**, and as a
+  *data controller* in spirit under the **DPDP Act, 2023**.
+- Intermediary safe-harbour (§79 IT Act) requires the due-diligence duties the
+  Terms and this runbook implement: an acceptable-use policy, a published
+  grievance channel, and takedown response. **These documents are the conditions
+  of the safe harbour — do not remove them.**
+- **No disclaimer eliminates all risk.** Residual risk is logged in §7.
+
+## 1. Abuse / takedown handling ("reactive moderation")
+
+ClipLink deliberately does **not** scan or pre-screen uploads. Deletion-only,
+reactive handling is the model. When a report arrives (via the
+[abuse-report issue template](https://github.com/sayyidsajad/cliplink/issues/new?template=abuse-report.md)
+or direct e-mail once available):
+
+1. **Verify the token is live.**
+   ```bash
+   curl -s "https://api.cliplink.workers.dev/s/<TOKEN>" | head -40
+   ```
+2. **Revoke immediately** (only you have the admin token):
+   ```bash
+   curl -X DELETE "https://api.cliplink.workers.dev/api/v1/shares/<TOKEN>" \
+        -H "Authorization: Bearer $ADMIN_TOKEN"
+   ```
+   Revocation is instant: the share page flips to "revoked", the signed-URL
+   path refuses revoked rows, and the blob is deleted server-side.
+3. **Log the decision** in a private local file: date, token (after revocation
+   the row self-purges within retention, so capture it first: token, filename,
+   size, report text). Keep for the retention you prefer; never keep file
+   contents.
+4. **Respond to the reporter** with the action taken and date.
+5. **CSAM / credible crime reports:** revoke, do **not** view further, keep a
+   single-record log (date, token, action), and evaluate notification duties
+   (e.g. the National Cyber Crime portal / local police). Time is of the
+   essence — escalate the same day.
+
+### Timing standard (published in the Terms)
+- Acknowledge: ≤ **24 h**
+- Takedown/status update: ≤ **72 h**
+
+## 2. Copyright & DMCA-style notices
+
+A valid notice has six elements (§512(c)(3) DMCA, mirrored in the issue
+template): work identification, URL/token of the material, reporter contact,
+good-faith statement, accuracy statement, signature. If any required element is
+missing, reply once requesting the missing piece; do not take action on
+incomplete notices, but note them. On a complete valid notice: revoke per §1,
+record both the notice and your response, and consider the "repeat infringer"
+stance documented in the Terms (removal on each valid notice; the built-in
+rate-limit and 7-day retention already suppress large-scale repeaters).
+Counter-notices: as sole operator you are currently *not* filing a DMCA agent
+registration (see §7 user actions) — treat this procedure as good-faith
+compliance, not statutory DMCA process.
+
+## 3. India-specific duties
+
+| Duty | Source | What we do |
+|---|---|---|
+| Grievance officer published with response timelines | IT Rules 2021, rule 3(2)/4 | Named in Terms §11; GitHub reports channel; 24 h/72 h targets |
+| Takedown for unlawful content when tasked by valid order/appropriate government | s.79(3)(b), s.69A IT Act | Revoke immediately per §1; preserve minimal logs if order requires |
+| Retain specific data on direction | s.69A / direction | D1 rows exist for ≤7 days post-expiry unless an order requires otherwise; by default we purge |
+| CERT-In cyber-incident reporting when applicable | CERT-In Directions 2022 (6-hour window for specified incidents) | If an incident necessitates it: report to `<incident@cert-in.org.in>` with prescribed fields; do not wait to also notify users |
+| Children's data | DPDP Act 2023 s.9 | Service is 18+ only (consent checkbox in app + Terms); no child data knowingly processed |
+| Purpose limitation & erasure | DPDP Act 2023 | Privacy Policy §6 grants access/correction/erasure; implementable because rows are anonymous and token-linked |
+
+## 4. Service kill-switch (containment playbook)
+
+If the service is being abused at scale and immediate containment is needed:
+
+1. **Dry out new uploads** — set `wrangler.toml` `MAX_FILE_MB = 0` (or
+   `RATE_LIMIT_UPLOADS = 0` to accept zero uploads) and redeploy:
+   ```bash
+   cd backend && npx wrangler deploy
+   ```
+   An upload limit of 0 makes every share request fail fast while existing
+   links keep expiring normally.
+2. **Full stop** (nuclear): disable the worker route, then delete the
+   infrastructure when calm returns.
+   ```bash
+   npx wrangler delete            # removes the worker
+   ```
+   D1 database and Supabase buckets remain but no API accepts shares.
+3. **Rotating the origin** afterwards: re-deploy with feature flags off, raise
+   limits slowly, watch the logs.
+
+## 5. Record-keeping
+
+Maintain (locally, never committed): a dated log of every abuse report and
+takedown (token prefix, decision, block rationale), a list of legal requests
+received from authorities, and versions of the Terms/Privacy you served on each
+date (a `git log` of this website repo already supplies this).
+
+## 6. The no-guarantee clause (put this in your head, not just in a doc)
+
+An EULA, ToS, or licence reduces exposure; it doesn't erase it. Criminal law,
+consumer law, and human-rights obligations cannot be disclaimed away, and a
+court applies them regardless of what a website says. The runbook exists to
+demonstrate ongoing good-faith operator conduct — which is the strongest
+practical protection available.
+
+## 7. Residual risks & operator action items
+
+**User (maintainer) actions remaining:**
+- [ ] Create a real report mailbox (e.g. `abuse@<domain>`) and update the
+      Terms/Privacy/SECURITY/issue templates to use it.
+- [ ] Register a DMCA agent with the U.S. Copyright Office (free,
+      https://www.copyright.gov/dmca-agent/) if U.S. reach matters to you.
+- [ ] Confirm a governing-law city for Terms §10 (the `[CITY]` placeholder
+      must be filled before relying on the clause).
+- [ ] Consider a lawyer review of the Terms/Privacy before heavy publicity.
+- [ ] Consider incorporation and/or tech-liability insurance if the service
+      grows beyond a hobby footprint.
+
+**Structural (accepted, mitigated) risks:**
+- Anonymous uploads means malware/phishing can be shared by bad actors between
+  takedown ⇒ mitigated by: rate limits, storage budget, 24 h expiry, instant
+  revocation, reactive moderation per this runbook. The residual branding/reputational
+  risk is the largest and cannot be fully engineered away under an anonymous
+  model; raising an abuse barrier later (e.g. Cloudflare Turnstile) is an option.
+- No continuous monitoring ⇒ lawful content can slip through; mitigated by
+  fast takedown and documented timings.
+- Personal-liability model (sole individual, no company) ⇒ Terms cap damages
+  but do not immunise against core fraud/misconduct; incorporation would improve this.
+- Global reach vs. single-country operator ⇒ Terms attempt mutual consumer
+  carve-outs for EU/UK consumers; not perfect.

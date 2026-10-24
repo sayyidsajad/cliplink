@@ -3,12 +3,17 @@ import ClipLinkCore
 
 /// First-run explanation (FR-08): before monitoring starts, the user is told
 /// exactly what gets uploaded, what never gets uploaded, and how to stop.
+/// Since v0.3.2 the user must also consent to the Terms & Privacy Policy
+/// before Start Monitoring becomes available.
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     var onStart: (() -> Void)?
 
+    static let termsURL = URL(string: "https://sayyidsajad.github.io/cliplink-website/terms.html")!
+    static let privacyURL = URL(string: "https://sayyidsajad.github.io/cliplink-website/privacy.html")!
+
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 470),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -44,9 +49,31 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         )
         self.notificationsCheckbox = checkbox
 
+        // Terms/Privacy consent (v0.3.2): Start stays disabled until the user
+        // agrees. This surfaces the hosted-service legal terms at first run,
+        // before anything is ever uploaded.
+        let consent = NSButton(
+            checkboxWithTitle: "I'm 18 or older and I accept the Terms & Privacy Policy",
+            target: self,
+            action: #selector(legalConsentChanged(_:))
+        )
+        consent.font = NSFont.systemFont(ofSize: 13)
+        consent.setContentCompressionResistancePriority(.required, for: .horizontal)
+        self.legalCheckbox_ = consent
+
+        let legalLinksRow = NSStackView(views: [
+            NSView(), // leading spacer, keeps links visually under the text
+            legalButton("Read Terms", url: OnboardingWindowController.termsURL),
+            legalButton("Read Privacy Policy", url: OnboardingWindowController.privacyURL),
+        ])
+        legalLinksRow.orientation = .horizontal
+        legalLinksRow.spacing = 12
+        legalLinksRow.alignment = .firstBaseline
+
         let startButton = NSButton(title: "Start Monitoring", target: self, action: #selector(startAction(_:)))
         startButton.bezelStyle = .rounded
         startButton.keyEquivalent = "\r"
+        startButton.isEnabled = false
         self.startButton_ = startButton
 
         let quitButton = NSButton(title: "Quit", target: NSApp.self, action: #selector(NSApplication.terminate(_:)))
@@ -65,6 +92,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         container.addArrangedSubview(headline)
         container.addArrangedSubview(body)
         container.addArrangedSubview(checkbox)
+        container.addArrangedSubview(consent)
+        container.addArrangedSubview(legalLinksRow)
         container.addArrangedSubview(buttonRow)
 
         window.contentView = container
@@ -73,11 +102,34 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
                                toItem: window.contentView!, attribute: edge,
                                multiplier: 1, constant: 0).isActive = true
         }
-        window.setContentSize(NSSize(width: 560, height: 470))
+        window.setContentSize(NSSize(width: 560, height: 520))
     }
 
     private var notificationsCheckbox: NSButton!
+    private var legalCheckbox_: NSButton!
     private var startButton_: NSButton!
+
+    private func legalButton(_ title: String, url: URL) -> NSButton {
+        let button = NSButton(title: title, target: self, action: #selector(openLegalPage(_:)))
+        button.isBordered = false
+        button.font = NSFont.systemFont(ofSize: 12)
+        button.setAccessibilityIdentifier(url.absoluteString)
+        button.setAccessibilityURL(url)
+        associatedURLs[ObjectIdentifier(button)] = url
+        return button
+    }
+
+    private var associatedURLs: [ObjectIdentifier: URL] = [:]
+
+    @objc private func legalConsentChanged(_ sender: Any?) {
+        startButton_?.isEnabled = legalCheckbox_?.state == .on
+    }
+
+    @objc private func openLegalPage(_ sender: Any?) {
+        guard let button = sender as? NSButton,
+              let url = associatedURLs[ObjectIdentifier(button)] else { return }
+        NSWorkspace.shared.open(url)
+    }
 
     @objc private func persistNotificationsChoice(_ sender: Any?) {
         // The AppDelegate reads the checkbox state when Start is pressed.
@@ -91,6 +143,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     /// Whether the user ticked the notifications checkbox.
     var wantsNotifications: Bool {
         notificationsCheckbox?.state == .on
+    }
+
+    /// Whether the user consented to the Terms & Privacy Policy.
+    var hasLegalConsent: Bool {
+        legalCheckbox_?.state == .on
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

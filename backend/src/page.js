@@ -85,7 +85,8 @@ function page(title, inner) {
 <body>
 <div class="card">
 ${inner}
-<div class="footer">Shared with ClipLink · files expire automatically; the recipient needs only a browser.</div>
+<div class="footer">Shared with ClipLink · files expire automatically; the recipient needs only a browser.<br>
+<a href="https://sayyidsajad.github.io/cliplink-website/terms.html" style="color:inherit">Terms</a> · <a href="https://sayyidsajad.github.io/cliplink-website/privacy.html" style="color:inherit">Privacy</a> · <a href="https://github.com/sayyidsajad/cliplink/issues/new?template=abuse-report.md" style="color:inherit">Report abuse</a></div>
 </div>
 </body>
 </html>`;

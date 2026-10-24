@@ -1,9 +1,11 @@
 # Security policy
 
-ClipLink: a macOS menu-bar app (Swift) + Cloudflare Worker backend + Supabase
-Storage for blobs. Reporting a vulnerability: please open a
-[security advisory](https://github.com/sayyidsajad/cliplink/security/advisories/new)
-or a normal GitHub issue if it is not sensitive. Include reproduction steps.
+## Reporting a vulnerability
+
+Please open a [security advisory](https://github.com/sayyidsajad/cliplink/security/advisories/new)
+or a [normal issue](https://github.com/sayyidsajad/cliplink/issues/new?template=abuse-report.md)
+for abuse reports (illegal content, privacy, takedowns). Operating procedures:
+see [docs/LEGAL-RUNBOOK.md](docs/LEGAL-RUNBOOK.md).
 
 ## Supported versions
 

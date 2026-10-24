@@ -191,6 +191,31 @@ budget), so macOS Gatekeeper will warn on first open:
 - Blocklist matches the *filename before upload* — private-key-shaped files never leave the machine.
 - Every link expires; the cron deletes R2 objects; nothing server-side is retained beyond `ROW_RETENTION_DAYS` past expiry.
 
+## Legal & compliance
+
+Documents that govern the **hosted service** (the code is MIT; the hosted
+`api.cliplink.workers.dev` endpoint additionally runs under these):
+
+| Document | Location |
+|---|---|
+| Terms of Use (includes DMCA + IT-Rules grievance process) | <https://sayyidsajad.github.io/cliplink-website/terms.html> |
+| Privacy Policy (data-minimal, DPDP-aware) | <https://sayyidsajad.github.io/cliplink-website/privacy.html> |
+| Security policy & vulnerability reporting | [`SECURITY.md`](SECURITY.md) |
+| Legal & operations runbook (takedowns, CERT-In, kill switch, residual-risk log) | [`docs/LEGAL-RUNBOOK.md`](docs/LEGAL-RUNBOOK.md) |
+| Abuse reports | [GitHub issue — abuse template](https://github.com/sayyidsajad/cliplink/issues/new?template=abuse-report.md) |
+
+Surface points for these documents:
+
+- Website nav + footer (every page);
+- Share/error pages footer (`backend/src/page.js`);
+- App onboarding — consent checkbox **gates Start Monitoring** (v0.3.2+).
+
+**Transparent limitations:** these documents implement a good-faith compliance
+programme (India IT Rules 2021, DPDPA 2023, DMCA-style notice handling,
+EU-consumer-law carve-outs). They **do not provide immunity** — see
+`docs/LEGAL-RUNBOOK.md` §6–7 for the honest residual-risk list.
+
 ## License
 
-MIT — see `LICENSE` shipped in the DMG and in the repo root.
+MIT — see `LICENSE` shipped in the DMG and in the repo root. The MIT licence
+covers the source code; use of the hosted service is subject to the Terms above.
