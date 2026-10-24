@@ -19,11 +19,12 @@ backend runs free-tier on Cloudflare.
 - **Expiring links** — server-enforced 24h lifetime (configurable), after which both the link and the stored object are gone. Expired/revoked links show a plain "Link expired / Link revoked" page.
 - **Revocation** — every share gets a secret revoke token; revoke from the menu or by `DELETE` with the token. Deletion also removes the blob from storage.
 - **Server-side limits, no secrets in the app** — size/rate/expiration limits live in Worker config; the app just adapts to what the server advertises.
+- **Cardless storage** — blobs live in Supabase Storage (free, no card required); metadata in Cloudflare D1. A storage budget keeps everything inside the free tiers.
 
 ## Repository layout
 
 ```
-backend/      Cloudflare Worker (R2 + D1), D1 schema, wrangler config
+backend/      Cloudflare Worker (Supabase Storage + D1), D1 schema, wrangler config
 macapp/       Swift package: ClipLinkCore + ClipLink (menu-bar app) + ClipLinkCLI
 scripts/      make-app.sh, make-dmg.sh, make-icon.swift, test-backend.sh
 docs/         design notes / PRD
@@ -31,7 +32,9 @@ docs/         design notes / PRD
 
 ## Backend (Cloudflare Workers)
 
-Storage is R2 (objects) + D1 (metadata), fully on the free tier.
+Blobs live in **Supabase Storage** (cardless free tier, private bucket + short-lived
+signed URLs proxied through the Worker); metadata in **Cloudflare D1**. Both free,
+no payment card required anywhere.
 
 | Endpoint | Description |
 |---|---|
@@ -43,9 +46,10 @@ Storage is R2 (objects) + D1 (metadata), fully on the free tier.
 | `GET /api/v1/limits` | Advertised limits JSON (`maxFileBytes`, `expiryHours`, rate limits) — the app reads this before checking a file. |
 | `GET /healthz` | Liveness. |
 
-A scheduled cron (`*/10 * * * *`) purges expired objects and, after
-`ROW_RETENTION_DAYS`, old metadata rows. Skipped/empty uploads get a clean
-`400`; oversized a `413`; rate-limited a `429`.
+A scheduled cron (`*/10 * * * *`) purges expired objects, evicts the oldest ones
+when the storage budget is exceeded, and pings Supabase so the free project is
+never paused. Skipped/empty uploads get a clean `400`; oversized a `413`;
+rate-limited a `429`; over-budget a `507`.
 
 ### Local development (no deploy needed)
 
@@ -57,6 +61,18 @@ npx wrangler dev --port 8787 --ip 127.0.0.1 --test-scheduled
 # point the app at http://127.0.0.1:8787 (log/test: backend URL setting)
 ```
 
+Local dev also needs the Supabase blob credentials in `backend/.dev.vars`
+(gitignored):
+
+```
+SUPABASE_URL="https://<project-ref>.supabase.co"
+SUPABASE_SERVICE_KEY="<service_role key>"
+STORAGE_BUCKET="cliplink-dev"
+```
+
+Create the bucket once via the Storage API (service key auth):
+`POST {SUPABASE_URL}/storage/v1/bucket {"name":"cliplink-dev","public":false}`.
+
 A second environment with tiny limits makes expiry/rate tests easy:
 
 ```bash
@@ -65,10 +81,10 @@ npx wrangler dev --env tiny --port 8788 --ip 127.0.0.1 --test-scheduled --persis
 # limits: 1 MB files, ~12 s expiry, 3 uploads/h
 ```
 
-### Storage budget (stays inside the R2 free tier)
+### Storage budget (stays inside the free tiers)
 
-R2's free tier includes 10 GB of storage. The worker enforces its own
-`MAX_STORAGE_GB` (default **9 GB**) so it can never be billed:
+Supabase Storage's free tier is 1 GB / month. The worker enforces its own
+`MAX_STORAGE_GB` (default **0.9 GB**) so it can never be billed:
 
 - An upload that would push total stored bytes past the budget gets a clean
   **507 `storage_full`** (with `Retry-After`) — no silent overruns.
@@ -78,26 +94,43 @@ R2's free tier includes 10 GB of storage. The worker enforces its own
   after heavy use; and it also shrinks any *existing* buildout the moment the
   budget is lowered.
 
-Docs (R2/D1/Workers free tiers) and `MAX_STORAGE_GB`/limits live in
+All tunables (`MAX_FILE_MB`, expiry, rate limits, `MAX_STORAGE_GB`) live in
 `backend/wrangler.toml [vars]`.
 
-### Deploy to Cloudflare (free tier)
+### Deploy to Cloudflare + Supabase (both free, no card)
+
+*Cloudflare side (metadata):*
 
 ```bash
 cd backend
 npm install
-
-npx wrangler d1 create cliplink          # copy the database id below
-npx wrangler r2 bucket create cliplink-uploads
-
-# backend/wrangler.toml: paste the real `database_id` from the d1 create output
-
-npx wrangler d1 execute cliplink --remote --file=schema.sql   # create tables
-npx wrangler secret put ADMIN_TOKEN        # optional: lets you revoke any share via X-Admin-Token
-npx wrangler deploy
+npx wrangler d1 create cliplink        # paste the printed database_id into wrangler.toml
+npx wrangler d1 execute cliplink --remote --file=schema.sql
 ```
 
-Then point the menu-bar app's *Backend URL* to `https://cliplink-backend.<yoursubdomain>.workers.dev` (or set `PUBLIC_BASE_URL` in `wrangler.toml` [vars] if you attach a custom domain).
+*Supabase side (blobs):*
+
+1. supabase.com → new project (free plan; region e.g. ap-south-1).
+2. Storage → create a **private** bucket named `cliplink-files`.
+   (Free tier caps a single object at 50 MB — hence `MAX_FILE_MB="49"`.)
+3. Settings → API → copy **Project URL** and **service_role key**.
+
+*Wire them together:*
+
+```bash
+npx wrangler deploy                                          # first deploy
+printf 'https://<ref>.supabase.co'  | npx wrangler secret put SUPABASE_URL
+printf '<service_role key>'         | npx wrangler secret put SUPABASE_SERVICE_KEY
+npx wrangler secret put ADMIN_TOKEN                           # optional: admin revoke via X-Admin-Token
+npx wrangler deploy                                          # picks up secrets
+```
+
+The Worker serves at `https://<worker-name>.<subdomain>.workers.dev` — set that
+as the menu-bar app's *Backend URL* (or `PUBLIC_BASE_URL` with a custom domain).
+
+*Using the Supabase CLI instead? (`supabase projects create …`) needs a
+**plain full-access** access token from Account → Access tokens — scoped
+tokens get Forbidden on project creation.*
 
 ### Backend smoke tests
 

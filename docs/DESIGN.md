@@ -29,8 +29,9 @@ parsing edge cases with binary data, and metadata rides in two headers.
 
 ## Server
 
-- **R2** for bytes (key = random, never exposed); **D1** for
-  share metadata (`shares` table, see `backend/schema.sql`).
+- **R2 for bytes** → now **Supabase Storage for bytes** (key = random, never
+  exposed publicly; downloads are signed-URL-proxied through the Worker);
+  **D1** for share metadata (`shares` table, see `backend/schema.sql`).
 - Every request to a share re-checks `expires_at` / `revoked` → deterministic
   410 or a friendly expired/revoked page at `/s/:token`.
 - Cron (`*/10 * * * *`) deletes expired R2 objects, then purges rows older
@@ -39,7 +40,7 @@ parsing edge cases with binary data, and metadata rides in two headers.
 - **Storage budget**: total stored bytes are capped by `MAX_STORAGE_GB`. New
   uploads past the budget get `507 storage_full`; the cron force-evicts the
   oldest objects when usage overruns (config change or race). This keeps a
-  deployment inside the R2 free tier with zero billing risk.
+  deployment inside the storage free tier with zero billing risk.
 - Rate limiting by `install id` (client-generated, stored for rate limiting
   only) with IP fallback. It is **not** an authentication mechanism.
 - Revocation requires the per-share `revoke_token` header or the (optional)

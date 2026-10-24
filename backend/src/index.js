@@ -5,7 +5,7 @@
  *   POST   /api/v1/shares                 upload (raw body) -> create public share
  *   GET    /api/v1/limits                 advertised limits (JSON)
  *   GET    /api/v1/shares/:token          share metadata (JSON)
- *   GET    /api/v1/shares/:token/download file download (streams from R2)
+ *   GET    /api/v1/shares/:token/download file download (streams via Supabase Storage)
  *   DELETE /api/v1/shares/:token          revoke (requires per-share revoke token or admin token)
  *   GET    /s/:token                      human download page
  *   GET    /healthz
@@ -23,6 +23,7 @@
  */
 
 import { sharePage, errorPage, humanBytes } from "./page.js";
+import { makeStorage, storageKeepAlive } from "./supabase.js";
 
 const TOKEN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 const TOKEN_REGEX = /^[A-Za-z0-9_-]{8,64}$/;
@@ -147,7 +148,7 @@ function publicOrigin(cfg, request) {
 }
 
 async function deleteObjectQuietly(env, key) {
-  try { await env.BUCKET.delete(key); } catch { /* best-effort */ }
+  try { await makeStorage(env).delete(key); } catch { /* best-effort (double-guarded in supabase.js) */ }
 }
 
 // Bytes currently held in R2 by live (not yet deleted) share rows.
@@ -283,13 +284,10 @@ async function handleUpload(request, env, cfg, ctx) {
   }
   const objectKey = `shares/${token}/${filename}`;
 
-  // Stream the request body straight into R2 (single PUT; atomic on success).
+  // Stream the request body straight into storage (single PUT; atomic on success).
   let put;
   try {
-    put = await env.BUCKET.put(objectKey, request.body, {
-      httpMetadata: { contentType: "application/octet-stream" },
-      customMetadata: { originalFilename: filename },
-    });
+    put = await makeStorage(env).put(objectKey, request.body, rawLength);
   } catch (e) {
     await env.DB.prepare("DELETE FROM shares WHERE token = ?1").bind(token).run();
     throw new ApiError(502, "storage_error", `Could not store the file. (${String(e && e.message)})`);
@@ -364,24 +362,32 @@ function parseRange(header) {
 
 async function handleDownload(request, env, token, ctx) {
   const row = await shareStatus(env, token);
-  const range = parseRange(request.headers.get("Range"));
-  const object = await env.BUCKET.get(row.object_key, range ? { range } : undefined);
-  if (!object) throw new ApiError(410, "gone", "This file is no longer available.");
+  const rangeHeader = request.headers.get("Range");
+  if (row.size === 0) throw new ApiError(410, "gone", "This file is no longer available.");
+  const range = rangeHeader ? parseRange(rangeHeader) : null;
+
+  const object = await makeStorage(env).getStream(row.object_key, {
+    range: range ? rangeHeader : undefined,
+  });
+  if (!object || object.status === 404) throw new ApiError(410, "gone", "This file is no longer available.");
 
   const ascii = row.filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_").slice(0, 120) || "file";
   const headers = {
     "Content-Type": "application/octet-stream",
     "X-Content-Type-Options": "nosniff",
-    "Accept-Ranges": "bytes",
     "Cache-Control": "no-store, max-age=0",
     "Content-Disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(row.filename)}`,
   };
-  if (object.size !== undefined) headers["Content-Length"] = String(object.size);
+  if (object.size !== undefined) {
+    headers["Content-Length"] = String(object.size);
+    if (range) headers["Accept-Ranges"] = "bytes";
+  }
+  if (object.contentRange) headers["Content-Range"] = object.contentRange;
 
   ctx.waitUntil(
     env.DB.prepare("UPDATE shares SET downloads = downloads + 1 WHERE token = ?1").bind(token).run()
   );
-  return new Response(object.body, { status: range ? 206 : 200, headers });
+  return new Response(object.body, { status: object.status, headers });
 }
 
 async function handleRevoke(request, env, token) {
@@ -398,8 +404,8 @@ async function handleRevoke(request, env, token) {
   }
 
   const now = Date.now();
-  if (!row.revoked) {
-    await env.BUCKET.delete(row.object_key);
+  if (!row.revoked && !row.object_deleted) {
+    await makeStorage(env).delete(row.object_key);
     await env.DB.prepare(
       "UPDATE shares SET revoked = 1, object_deleted = 1, deleted_at = ?2 WHERE token = ?1"
     ).bind(token, now).run();
@@ -480,5 +486,12 @@ export default {
     const deleted = await cleanupExpired(env, cfg);
     const evicted = await enforceStorageBudget(env, cfg, now);
     console.log(`cliplink cleanup: expired objects deleted: ${deleted}; evicted by storage budget: ${evicted}`);
+    // Keepalive: free Supabase projects pause after ~7 days without traffic.
+    // One cheap REST call per cron keeps the project (and thus blob storage) live.
+    if (env.SUPABASE_URL) {
+      try { await storageKeepAlive(env); } catch (e) {
+        console.log("cliplink keepalive failed:", String((e && e.message) || e));
+      }
+    }
   },
 };
