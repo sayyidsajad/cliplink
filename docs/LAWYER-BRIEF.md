@@ -59,9 +59,10 @@ sign-off or punch-list.
    One Person Company / LLP, and getting tech-liability insurance?
 9. **ToS change policy** — is "Last updated" + GitHub-releases announcement an
    adequate notice mechanism for binding users to revised terms?
-10. **Venue clause** — "competent courts at the Operator's place of residence"
-    — enforceable, or should a specific city be named publicly (with a privacy
-    cost)?
+10. **Venue clause** — "courts at Kochi, Kerala, India" (the Operator has
+    chosen to name their city of residence publicly): is it enforceable, and
+    do you advise keeping the city name or reverting to a city-free phrasing
+    (privacy trade-off)?
 
 ## Honest residual-risk statement (already published)
 

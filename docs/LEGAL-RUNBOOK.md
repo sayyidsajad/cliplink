@@ -121,8 +121,8 @@ practical protection available.
 - [x] DMCA registration prepared (field-by-field walkthrough:
       [`DMCA-REGISTRATION.md`](DMCA-REGISTRATION.md)) — filing itself requires
       the maintainer's Login.gov sign-in.
-- [x] Governing-law venue resolved without exposing a city: "competent courts
-      at the Operator's place of residence in India" (Terms §10).
+- [x] Governing-law venue resolved: **Kochi, Kerala, India** named in Terms §10
+      (maintainer's confirmed city of residence).
 - [x] Lawyer-review pack prepared: [`LAWYER-BRIEF.md`](LAWYER-BRIEF.md)
       (10-point question list; sign-off template at the end).
 
