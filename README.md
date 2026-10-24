@@ -9,8 +9,8 @@ link, not the file. Nothing sensitive is embedded in the app; the whole
 backend runs free-tier on Cloudflare + Supabase with zero payment cards.
 
 The shared hosted instance runs at **`https://api.cliplink.workers.dev`**
-(preconfigured in the released app). Everything can also be self-hosted —
-see *Deploy* below.
+(preconfigured in the released app; **download site: <https://sayyidsajad.github.io/cliplink-website/>**).
+Everything can also be self-hosted — see *Deploy* below.
 
 ## Features
 
