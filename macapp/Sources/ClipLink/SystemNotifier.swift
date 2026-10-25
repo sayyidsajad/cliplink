@@ -12,6 +12,9 @@ final class SystemNotifier: ClipLinkNotifier {
     }
 
     var isEnabled = false
+    /// OS-level denial (user said no, or turned it off in System Settings) —
+    /// lets the menu explain WHY enabling is not sticking.
+    var deniedBySystem = false
 
     func requestAuthorization() async {
         guard let center else {
@@ -20,6 +23,20 @@ final class SystemNotifier: ClipLinkNotifier {
         }
         let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) == true
         await MainActor.run { isEnabled = granted }
+        await refreshSystemState()
+    }
+
+    /// Reads the OS permission state (prompt answered long ago, app relaunched,
+    /// setting flipped in System Settings) into our cached flags.
+    func refreshSystemState() async {
+        guard let center else { return }
+        let settings = await withCheckedContinuation { (cont: CheckedContinuation<UNNotificationSettings, Never>) in
+            center.getNotificationSettings { cont.resume(returning: $0) }
+        }
+        await MainActor.run {
+            isEnabled = settings.authorizationStatus == .authorized
+            deniedBySystem = settings.authorizationStatus == .denied
+        }
     }
 
     func notifySuccess(title: String, message: String) {

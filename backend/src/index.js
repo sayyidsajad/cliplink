@@ -559,6 +559,23 @@ async function handleConnectPoll(request, env, url) {
   return json({ connected: false });
 }
 
+/**
+ * "Is THIS install already connected?" — the app asks this at launch (and
+ * before each connect flow) instead of re-running OAuth every time. A
+ * connection row from an earlier session (new app build, quit/restart) keeps
+ * the app green without any browser round-trip.
+ */
+async function handleConnectedCheck(request, env) {
+  const installHeader = request.headers.get("X-ClipLink-Install") || "";
+  const install = INSTALL_REGEX.test(installHeader) ? installHeader : null;
+  const conn = await latestConnection(env, install, "drive");
+  if (!conn) return json({ connected: false });
+  let email = null;
+  try { email = await revealAccountEmail(env, conn.account_label); } catch { email = null; }
+  const safeEmail = typeof email === "string" ? email : null;
+  return json({ connected: true, connectionId: conn.id || "", email: safeEmail });
+}
+
 /** Google redirects here with the one-time code + our state. */
 async function handleDriveCallback(request, env, cfg, url) {
   const close = (title, detail, ok) => new Response(
@@ -613,9 +630,13 @@ async function handleDriveCallback(request, env, cfg, url) {
 
   const now = Date.now();
   if (existing) {
+    // Re-consent: refresh the token AND touch created_at — the app's poll and
+    // "connected?" check compare the connection age against the connect
+    // session; without the touch the app never learns a re-auth happened
+    // (it reported "not connected" while the connection was perfectly alive).
     await env.DB.prepare(
-      "UPDATE connections SET refresh_token = ?1, account_label = ?2, access_token = ?3, access_expires_at = ?4 WHERE id = ?5"
-    ).bind(sealed.refresh_token, sealed.account_label, sealed.access_token, sealed.access_expires_at, existing).run();
+      "UPDATE connections SET refresh_token = ?1, account_label = ?2, access_token = ?3, access_expires_at = ?4, created_at = ?6 WHERE id = ?5"
+    ).bind(sealed.refresh_token, sealed.account_label, sealed.access_token, sealed.access_expires_at, existing, now).run();
   } else {
     await env.DB.prepare(
       "INSERT INTO connections (id, provider, refresh_token, account_label, owner_install_id, created_at, access_token, access_expires_at) VALUES (?1, 'drive', ?2, ?3, ?4, ?5, ?6, ?7)"
@@ -798,6 +819,9 @@ export default {
       }
       if (path === "/api/v1/providers/drive/authorize" && request.method === "GET") {
         return await handleConnectStart(request, env, cfg);
+      }
+      if (path === "/api/v1/provider/drive/connected" && request.method === "GET") {
+        return await handleConnectedCheck(request, env);
       }
       if (path === "/api/v1/providers/drive/poll" && request.method === "GET") {
         return await handleConnectPoll(request, env, url);

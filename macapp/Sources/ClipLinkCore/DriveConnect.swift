@@ -13,6 +13,13 @@ public struct DriveConnectStart: Codable, Sendable, Equatable {
     public let expiresInMs: Int?
 }
 
+/// Answer to "is this install id already connected?" (backend pre-check).
+public struct DriveConnectStatus: Codable, Sendable, Equatable {
+    public let connected: Bool
+    public let connectionId: String?
+    public let email: String?
+}
+
 /// One poll response from `GET /api/v1/providers/drive/poll?state=…`.
 public struct DriveConnectPoll: Codable, Sendable, Equatable {
     public let connected: Bool
@@ -48,6 +55,27 @@ public final class DriveConnectClient: @unchecked Sendable {
         var comps = URLComponents(url: backend.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if let query { comps.queryItems = query }
         return comps.url!
+    }
+
+    /// Cheap pre-check: does THIS install id already have a live Drive
+    /// connection on the backend? (Used at launch and before the OAuth flow so
+    /// an existing connection is honoured — previously a re-connect looked
+    /// like "not connected" forever because the poll only reported brand-new
+    /// connections.)
+    public func checkConnected(backend: URL, installID: String) async throws -> DriveConnectStatus {
+        var request = URLRequest(url: url(backend, "api/v1/provider/drive/connected"))
+        request.setValue(installID, forHTTPHeaderField: "X-ClipLink-Install")
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw DriveConnectError.server(status, "connected-check unavailable")
+        }
+        do {
+            return try JSONDecoder().decode(DriveConnectStatus.self, from: data)
+        } catch {
+            throw DriveConnectError.invalidResponse("Could not parse the connected-check response.")
+        }
     }
 
     /// Asks the backend to start a connect session. Returns the Google consent

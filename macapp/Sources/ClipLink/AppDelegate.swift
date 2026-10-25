@@ -61,6 +61,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusLine = "Not configured yet"
             DispatchQueue.main.async { [weak self] in self?.showOnboarding(initial: true) }
         }
+        // Sync reality → UI at every launch: a connection that exists server-
+        // side makes the menu show green immediately (fixes the stale
+        // "no Drive connected" display), and the OS notification permission
+        // state repairs the Enable/Disable label.
+        Task { [weak self] in await self?.refreshConnectedState() }
+        Task { [weak self] in await self?.notifier.refreshSystemState() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -168,8 +174,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         backendSub.autoenablesItems = false
         menu.addItem(backend)
 
-        let notificationsItem = actionItem("Enable Notifications", #selector(toggleNotifications(_:)))
-        notificationsItem.state = settings.notificationsEnabled ? .on : .off
+        let notificationsItem = actionItem(
+            settings.notificationsEnabled
+                ? "Disable Notifications"
+                : (notifier.deniedBySystem
+                    ? "Enable Notifications — blocked in System Settings"
+                    : "Enable Notifications"),
+            #selector(toggleNotifications(_:))
+        )
+        notificationsItem.state = settings.notificationsEnabled ? NSControl.StateValue.on : .off
         menu.addItem(notificationsItem)
 
         menu.addItem(actionItem("Preferences…", #selector(showPreferences(_:))))
@@ -397,6 +410,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startDriveConnect()
     }
 
+    /// Asks the backend whether this install already has a live Drive
+    /// connection. If yes, EVERY surface (settings, onboarding, menu) flips to
+    /// connected immediately — no OAuth, no browser, no poll.
+    func refreshConnectedState() async {
+        let backend = settings.backendURL
+        let installID = settings.installID
+        do {
+            let status = try await driveConnect.checkConnected(backend: backend, installID: installID)
+            guard status.connected, let connectionId = status.connectionId, !connectionId.isEmpty else { return }
+            await MainActor.run {
+                let wasConnected = settings.isDriveConnected
+                settings.driveConnectionID = connectionId
+                settings.driveEmail = status.email ?? ""
+                if !wasConnected || status.email != nil {
+                    onboardingWindowController?.setDriveConnected(status.email)
+                }
+                statusLine = "Google Drive connected ✓ \(status.email ?? "your account")"
+            }
+        } catch {
+            // Backend unreachable / endpoint missing: local state stays as-is.
+        }
+    }
+
     func startDriveConnect() {
         guard !driveConnecting else { return }
         driveConnecting = true
@@ -404,6 +440,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusLine = "Waiting for Google Drive consent…"
         Task { [weak self] in
             guard let self else { return }
+            // Fast path: already connected on the backend → nothing to do.
+            do {
+                let existing = try await self.driveConnect.checkConnected(
+                    backend: self.settings.backendURL, installID: self.settings.installID)
+                if existing.connected, let cid = existing.connectionId, !cid.isEmpty {
+                    await MainActor.run {
+                        self.settings.driveConnectionID = cid
+                        self.settings.driveEmail = existing.email ?? ""
+                        self.onboardingWindowController?.setDriveConnected(existing.email)
+                        self.statusLine = "Google Drive connected ✓ \(existing.email ?? "your account")"
+                        self.driveConnecting = false
+                        self.onboardingWindowController?.setDriveBusy(false)
+                    }
+                    return
+                }
+            } catch { /* fall through to the full flow */ }
+
             let backend = self.settings.backendURL
             let installID = self.settings.installID
             do {
@@ -464,12 +517,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             notifier.isEnabled = false
             statusLine = "Notifications off"
         } else {
+            statusLine = "Asking macOS for notification permission…"
             Task { [weak self] in
                 guard let self else { return }
                 await self.notifier.requestAuthorization()
                 await MainActor.run {
                     self.settings.notificationsEnabled = self.notifier.isEnabled
-                    self.statusLine = self.settings.notificationsEnabled ? "Notifications on" : "Notifications denied in System Settings"
+                    if self.notifier.isEnabled {
+                        self.statusLine = "Notifications on"
+                    } else if self.notifier.deniedBySystem {
+                        self.statusLine = "Blocked in System Settings → Notifications → ClipLink → Allow"
+                    } else {
+                        self.statusLine = "Permission not granted — try again"
+                    }
                 }
             }
         }
@@ -512,7 +572,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.monitor?.start()
             self.statusLine = "Watching the clipboard — copy any file in Finder"
         }
-        Task { [weak self] in await self?.refreshDriveGate() }
+        Task { [weak self] in
+            await self?.refreshDriveGate()
+            await self?.refreshConnectedState() // repaint "Connected" if a server-side connection already exists
+        }
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         if initial { NSApp.activate(ignoringOtherApps: true) }
