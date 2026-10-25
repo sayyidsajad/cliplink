@@ -6,7 +6,8 @@ ClipLink is a macOS menu-bar app + serverless backend. When you copy a file
 (`⌘C` in Finder), ClipLink quietly uploads it and replaces the clipboard
 content with a public, expiring download URL — so the next `⌘V` pastes the
 link, not the file. Nothing sensitive is embedded in the app; the whole
-backend runs free-tier on Cloudflare + Supabase with zero payment cards.
+backend runs **free** on Cloudflare, and your **files live in your own
+Google Drive** (BYO storage), so file-bytes operating cost is zero.
 
 The shared hosted instance runs at **`https://api.cliplink.workers.dev`**
 (preconfigured in the released app; **download site: <https://sayyidsajad.github.io/cliplink-website/>**).
@@ -23,12 +24,12 @@ Everything can also be self-hosted — see *Deploy* below.
 - **Expiring links** — server-enforced 24h lifetime (configurable), after which both the link and the stored object are gone. Expired/revoked links show a plain "Link expired / Link revoked" page.
 - **Revocation** — every share gets a secret revoke token; revoke from the menu or by `DELETE` with the token. Deletion also removes the blob from storage.
 - **Server-side limits, no secrets in the app** — size/rate/expiration limits live in Worker config; the app just adapts to what the server advertises.
-- **Cardless storage** — blobs live in Supabase Storage (free, no card required); metadata in Cloudflare D1. A storage budget keeps everything inside the free tiers.
+- **BYO storage (v0.4+)** — files are uploaded into the **uploader's own Google Drive**; the backend stores only metadata + an AES-GCM-sealed OAuth refresh token (see [BYO storage](#byo-storage-v04) below).
 
 ## Repository layout
 
 ```
-backend/      Cloudflare Worker (Supabase Storage + D1), D1 schema, wrangler config
+backend/      Cloudflare Worker (Google Drive + D1), D1 schema, wrangler config
 macapp/       Swift package: ClipLinkCore + ClipLink (menu-bar app) + ClipLinkCLI
 scripts/      make-app.sh, make-dmg.sh, make-icon.swift, test-backend.sh
 docs/         design notes / PRD
@@ -36,9 +37,9 @@ docs/         design notes / PRD
 
 ## Backend (Cloudflare Workers)
 
-Blobs live in **Supabase Storage** (cardless free tier, private bucket + short-lived
-signed URLs proxied through the Worker); metadata in **Cloudflare D1**. Both free,
-no payment card required anywhere.
+Metadata lives in **Cloudflare D1**; file bytes stream **straight into the
+uploader's Google Drive** (resumable 8 MiB chunks; Range requests proxied back
+on download). The Worker never stores a byte of file content.
 
 | Endpoint | Description |
 |---|---|
@@ -47,94 +48,92 @@ no payment card required anywhere.
 | `GET /api/v1/shares/:token/download` | The actual bytes (`Content-Disposition: attachment`). |
 | `DELETE /api/v1/shares/:token` | Revoke. Requires `X-ClipLink-Revoke-Token` header (or admin secret `X-Admin-Token`). |
 | `GET /s/:token` | Human share page with download button, filename/size/expiry info. |
-| `GET /api/v1/limits` | Advertised limits JSON (`maxFileBytes`, `expiryHours`, rate limits) — the app reads this before checking a file. |
+| `GET /api/v1/limits` | Advertised limits JSON (`maxFileBytes`, `expiryHours`, rate limits, `storageProvider`) — the app reads this before checking a file. |
 | `GET /healthz` | Liveness. |
+| `GET /api/v1/providers/drive/authorize` | Start the BYO connect flow (`{authorizeUrl, state}`). |
+| `GET /api/v1/providers/drive/poll?state=` | App polls until the browser consent completes. |
+| `GET /oauth/drive/callback` | Google OAuth redirect target (opens-to-close HTML page). |
 
-A scheduled cron (`*/10 * * * *`) purges expired objects, evicts the oldest ones
-when the storage budget is exceeded, and pings Supabase so the free project is
-never paused. Skipped/empty uploads get a clean `400`; oversized a `413`;
-rate-limited a `429`; over-budget a `507`.
+A scheduled cron (`*/10 * * * *`) deletes expired objects (in the user's Drive
+for BYO shares; in Supabase for legacy rows), evicts the oldest legacy objects
+when the storage budget is exceeded, and retries object deletion for revoked
+shares. Skipped/empty uploads get a clean `400`; oversized a `413`;
+rate-limited a `429`; over-budget a `507` (legacy storage only).
 
 ### Local development (no deploy needed)
 
 ```bash
 cd backend
 npm install
-npx wrangler d1 execute cliplink --local --file=schema.sql
+npx wrangler d1 execute cliplink --local --file=migrate-byo.sql
 npx wrangler dev --port 8787 --ip 127.0.0.1 --test-scheduled
 # point the app at http://127.0.0.1:8787 (log/test: backend URL setting)
 ```
 
-Local dev also needs the Supabase blob credentials in `backend/.dev.vars`
-(gitignored):
+Local dev runs the **mock provider** — a D1-backed test blob store, no Google
+account needed. Add to `.dev.vars` (gitignored):
 
 ```
-SUPABASE_URL="https://<project-ref>.supabase.co"
-SUPABASE_SERVICE_KEY="<service_role key>"
-STORAGE_BUCKET="cliplink-dev"
+STORAGE_PROVIDER="mock"
+MOCK_PROVIDER="1"
+TOKEN_SECRET="dev-token-secret-do-not-use-in-prod"
 ```
 
-Create the bucket once via the Storage API (service key auth):
-`POST {SUPABASE_URL}/storage/v1/bucket {"name":"cliplink-dev","public":false}`.
+Guest shares (uploads without a connected Drive) are only possible with
+`MOCK_PROVIDER=1`, never in production. To test the *real* Drive path locally,
+set `STORAGE_PROVIDER="drive"` plus `DRIVE_CLIENT_ID`/`DRIVE_CLIENT_SECRET`
+and add `http://127.0.0.1:8787/oauth/drive/callback` as an authorised redirect
+URI on the OAuth client (dev-only; remove it after testing).
 
 A second environment with tiny limits makes expiry/rate tests easy:
 
 ```bash
-npx wrangler d1 execute cliplink --local --file=schema.sql --persist-to .state02
+npx wrangler d1 execute cliplink --local --file=migrate-byo.sql --persist-to .state02
 npx wrangler dev --env tiny --port 8788 --ip 127.0.0.1 --test-scheduled --persist-to .state02
 # limits: 1 MB files, ~12 s expiry, 3 uploads/h
 ```
 
-### Storage budget (stays inside the free tiers)
+### Legacy storage budget (Supabase rows only)
 
-Supabase Storage's free tier is 1 GB / month. The worker enforces its own
-`MAX_STORAGE_GB` (default **0.9 GB**) so it can never be billed:
+v0.3-era shares keep their bytes in Supabase Storage. The worker enforces a
+`MAX_STORAGE_GB` ceiling (default **0.9 GB**) so the free tier can never be
+billed while they live out their ≤ 24 h lifetimes:
 
 - An upload that would push total stored bytes past the budget gets a clean
   **507 `storage_full`** (with `Retry-After`) — no silent overruns.
-- Every 10 minutes the cron **evicts the oldest objects** until usage is back
-  under budget. Evicted links answer `410 gone` ("no longer available").
-- Normal expiry cleanup happens first, so in practice the budget only kicks in
-  after heavy use; and it also shrinks any *existing* buildout the moment the
-  budget is lowered.
+- Every 10 minutes the cron **evicts the oldest legacy objects** until usage
+  is back under budget. Evicted links answer `410 gone`.
+- BYO (Drive) rows are excluded from the budget — they hold no bytes on our
+  side. Once every legacy row has expired, the Supabase project is deleted
+  entirely and even this budget stops mattering.
 
 All tunables (`MAX_FILE_MB`, expiry, rate limits, `MAX_STORAGE_GB`) live in
 `backend/wrangler.toml [vars]`.
 
-### Deploy to Cloudflare + Supabase (both free, no card)
+### Deploy (Cloudflare only; the storage is *your users'* Drive)
 
-*Cloudflare side (metadata):*
-
-```bash
-cd backend
-npm install
-npx wrangler d1 create cliplink        # paste the printed database_id into wrangler.toml
-npx wrangler d1 execute cliplink --remote --file=schema.sql
-```
-
-*Supabase side (blobs):*
-
-1. supabase.com → new project (free plan; region e.g. ap-south-1).
-2. Storage → create a **private** bucket named `cliplink-files`.
-   (Free tier caps a single object at 50 MB — hence `MAX_FILE_MB="49"`.)
-3. Settings → API → copy **Project URL** and **service_role key**.
-
-*Wire them together:*
+1. `npx wrangler d1 create cliplink` — paste the printed database ID into
+   `wrangler.toml`, then `npx wrangler d1 execute cliplink --remote --file=schema.sql`.
+2. Create a Google OAuth client (Web application) with redirect URI
+   `https://<your-worker>/oauth/drive/callback`, enable the **Google Drive
+   API** on that project, add `https://www.googleapis.com/auth/drive.file`
+   to the consent screen's **Data Access**, and publish the consent screen
+   (unverified production = tokens don't expire weekly).
+3. Wire secrets + deploy:
 
 ```bash
-npx wrangler deploy                                          # first deploy
-printf 'https://<ref>.supabase.co'  | npx wrangler secret put SUPABASE_URL
-printf '<service_role key>'         | npx wrangler secret put SUPABASE_SERVICE_KEY
-npx wrangler secret put ADMIN_TOKEN                           # optional: admin revoke via X-Admin-Token
-npx wrangler deploy                                          # picks up secrets
+npx wrangler secret put DRIVE_CLIENT_ID      # OAuth client id
+npx wrangler secret put DRIVE_CLIENT_SECRET  # OAuth client secret
+npx wrangler secret put TOKEN_SECRET         # openssl rand -base64 48 — keys AES-GCM sealing; back it up, never rotate casually
+npx wrangler secret put ADMIN_TOKEN          # optional: admin revoke via X-Admin-Token
+npx wrangler deploy
 ```
+
+4. Existing installs upgrading from ≤0.3 need the idempotent migration:
+   `npx wrangler d1 execute cliplink --remote --file=migrate-byo.sql --yes`.
 
 The Worker serves at `https://<worker-name>.<subdomain>.workers.dev` — set that
 as the menu-bar app's *Backend URL* (or `PUBLIC_BASE_URL` with a custom domain).
-
-*Using the Supabase CLI instead? (`supabase projects create …`) needs a
-**plain full-access** access token from Account → Access tokens — scoped
-tokens get Forbidden on project creation.*
 
 ### Backend smoke tests
 
@@ -159,10 +158,11 @@ Run it directly:
 open build/ClipLink.app
 ```
 
-On first launch the app shows a short onboarding message in the menu; enable
-monitoring from the menu-bar icon (clipboard icon). All settings are stored in
+On first launch the app walks through onboarding: the legal-consent checkbox
+and (when the backend runs BYO storage) a **Connect Google Drive** step, both
+of which gate **Start Monitoring**. All settings are stored in
 `app.cliplink.ClipLink` preferences: `monitoringEnabled`, `backendURL`,
-`blockedPatterns`.
+`blockedPatterns`, `driveConnectionID`, `driveEmail`.
 
 ### Headless CLI (for tests/CI)
 

@@ -55,12 +55,13 @@ itself.
 > **Body (use your own words; make it story-first, short):**
 > Story: I share screenshots/downloads constantly and hated upload-forms +
 > dead links. ClipLink watches the clipboard: copy a file in Finder, and the
-> menu-bar app uploads it and puts an expiring download link on your
-> clipboard — paste anywhere, works in every browser without an account.
-> Links live 24 h, then the file and metadata are deleted; there is a revoke
-> token per share. Everything is MIT, the backend is ~2 files of JS on
-> Cloudflare Workers (D1) with Supabase Storage, and the app is Swift. No
-> accounts, no tracking, no analytics — the whole system fits in ~1000 lines.
+> menu-bar app uploads it **into your own Google Drive** and puts an expiring
+> download link on your clipboard — paste anywhere, works in every browser
+> without an account. Files live in YOUR Drive (BYO storage — the server
+> stores zero file bytes, only metadata); links live 24 h, then the file is
+> deleted from your Drive by the cron; there is a revoke token per share.
+> Everything is MIT, the backend is a small JS Worker on Cloudflare Workers
+> (D1), and the app is Swift. No accounts, no tracking, no analytics.
 > Website: https://sayyidsajad.github.io/cliplink-website/ ·
 > Source: https://github.com/sayyidsajad/cliplink
 > Ask: try it, break it, tell me what's missing.

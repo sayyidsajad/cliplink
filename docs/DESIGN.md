@@ -29,18 +29,23 @@ parsing edge cases with binary data, and metadata rides in two headers.
 
 ## Server
 
-- **R2 for bytes** → now **Supabase Storage for bytes** (key = random, never
-  exposed publicly; downloads are signed-URL-proxied through the Worker);
-  **D1** for share metadata (`shares` table, see `backend/schema.sql`).
+- **R2 for bytes** → v0.3-era **Supabase Storage for bytes** → since **v0.4,
+  BYO: the uploader's own Google Drive for bytes** (PKCE OAuth, sealed refresh
+  token, resumable uploads streamed straight off the request body, downloads
+  Range-proxied through the Worker — the operator stores zero file bytes);
+  **D1** for share metadata and connection records
+  (`shares`, `connections`, `oauth_sessions` — see `backend/schema.sql`).
 - Every request to a share re-checks `expires_at` / `revoked` → deterministic
   410 or a friendly expired/revoked page at `/s/:token`.
-- Cron (`*/10 * * * *`) deletes expired R2 objects, then purges rows older
-  than `ROW_RETENTION_DAYS` so the "expired" page can still explain itself
-  briefly before disappearing entirely.
-- **Storage budget**: total stored bytes are capped by `MAX_STORAGE_GB`. New
-  uploads past the budget get `507 storage_full`; the cron force-evicts the
-  oldest objects when usage overruns (config change or race). This keeps a
-  deployment inside the storage free tier with zero billing risk.
+- Cron (`*/10 * * * *`) deletes expired objects (in the user's Drive for BYO
+  rows; Supabase for legacy rows), retries deletion for revoked shares, then
+  purges rows older than `ROW_RETENTION_DAYS` so the "expired" page can still
+  explain itself briefly before disappearing entirely.
+- **Storage budget (legacy rows only)**: total stored bytes are capped by
+  `MAX_STORAGE_GB`. New uploads past the budget get `507 storage_full`; the
+  cron force-evicts the oldest objects when usage overruns (config change or
+  race). This keeps a deployment inside the storage free tier with zero
+  billing risk; BYO rows hold no bytes on the operator's side and are excluded.
 - Rate limiting by `install id` (client-generated, stored for rate limiting
   only) with IP fallback. It is **not** an authentication mechanism.
 - Revocation requires the per-share `revoke_token` header or the (optional)

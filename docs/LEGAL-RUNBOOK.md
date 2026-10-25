@@ -94,7 +94,9 @@ If the service is being abused at scale and immediate containment is needed:
    ```bash
    npx wrangler delete            # removes the worker
    ```
-   D1 database and Supabase buckets remain but no API accepts shares.
+   D1 metadata remains; BYO files are already in users' own Drives (a parked
+   link expires point-in-time regardless); the legacy Supabase bucket expires
+   out after its ≤ 7-day row retention.
 3. **Rotating the origin** afterwards: re-deploy with feature flags off, raise
    limits slowly, watch the logs.
 
@@ -137,13 +139,26 @@ practical protection available.
 
 **Structural (accepted, mitigated) risks:**
 - Anonymous uploads means malware/phishing can be shared by bad actors between
-  takedown ⇒ mitigated by: rate limits, storage budget, 24 h expiry, instant
-  revocation, reactive moderation per this runbook. The residual branding/reputational
-  risk is the largest and cannot be fully engineered away under an anonymous
-  model; raising an abuse barrier later (e.g. Cloudflare Turnstile) is an option.
+  takedown ⇒ mitigated by: rate limits, 24 h expiry, instant
+  revocation, reactive moderation per this runbook. **Since v0.4 the file bytes
+  live in the uploader's own Google Drive** — with a healthy abuse report the
+  operator deletes the *object* immediately; being in the user's Drive also
+  puts content moderation largely behind Google's own abuse stack. Code
+  execution of arbitrary payloads is still facilitated (the risk that remains
+  is *linking*, not hosting); a Cloudflare Turnstile upload barrier is the
+  planned next mitigation if volume justifies it. The residual
+  branding/reputational risk is the largest and cannot be fully engineered away
+  under an anonymous model.
 - No continuous monitoring ⇒ lawful content can slip through; mitigated by
   fast takedown and documented timings.
 - Personal-liability model (sole individual, no company) ⇒ Terms cap damages
   but do not immunise against core fraud/misconduct; incorporation would improve this.
 - Global reach vs. single-country operator ⇒ Terms attempt mutual consumer
   carve-outs for EU/UK consumers; not perfect.
+
+**Footer / 2026-10-25:** since this date the hosted instance is **BYO-only**
+(`STORAGE_PROVIDER="drive"`); legacy Supabase rows (v0.3, ≤ 12 shares, all
+created 2026-10-18..25) expire within their 24 h lifetime. The Supabase
+project (`mqqkubgcourkwbkaetfv`) is to be deleted no later than **2026-11-02**,
+after which its access token must be revoked in the Supabase dashboard and the
+`SUPABASE_URL` / `SUPABASE_SERVICE_KEY` Worker secrets removed.
