@@ -25,6 +25,7 @@ Everything can also be self-hosted — see *Deploy* below.
 - **Revocation** — every share gets a secret revoke token; revoke from the menu or by `DELETE` with the token. Deletion also removes the blob from storage.
 - **Server-side limits, no secrets in the app** — size/rate/expiration limits live in Worker config; the app just adapts to what the server advertises.
 - **BYO storage (v0.4+)** — files are uploaded into the **uploader's own Google Drive**; the backend stores only metadata + an AES-GCM-sealed OAuth refresh token (see [BYO storage](#byo-storage-v04) below).
+- **ClipLink Pro (v0.5+)** — one-time purchase unlock (no subscription): 🔒 **password-protected links**, **custom link expiry** (1 week / 30 days), and **per-link QR codes** (see [ClipLink Pro](#cliplink-pro-v05) below).
 
 ## Repository layout
 
@@ -233,6 +234,34 @@ zero file bytes ever touch the operator's infrastructure.
 programme (India IT Rules 2021, DPDPA 2023, DMCA-style notice handling,
 EU-consumer-law carve-outs). They **do not provide immunity** — see
 `docs/LEGAL-RUNBOOK.md` §6–7 for the honest residual-risk list.
+
+## ClipLink Pro (v0.5+)
+
+One-time payment, **no subscription**. Everything ships in the free core; Pro
+unlocks three conveniences enforced **server-side** (a non-licensed client is
+rejected with `403 pro_required`):
+
+| Feature | How it works |
+| --- | --- |
+| 🔒 Password-protected links | Share page asks for a password; the backend stores only a **PBKDF2-SHA-256 hash** (plaintext is never persisted). Unlock issues a 15-minute HMAC grant (HttpOnly cookie / `X-ClipLink-Access`). |
+| Custom link expiry | `X-ClipLink-Expiry-Hours` per upload — up to **30 days** (default stays 24 h). |
+| QR codes | Generated **client-side** via CoreImage → "Copy QR Code (PNG)" per link; the backend never sees them. |
+
+**License keys.** A key (`CLPRO-XXXX-XXXX-XXXX-XXXX`) is an HMAC payload minted
+from the operator's server-side seed; the Worker verifies it offline — nothing
+needs to be stored to prove a key. Keys are bound to at most **5 installs**
+(a non-reversible key id + install list live in D1; never the raw key). The app
+activates via Preferences → *Activate* (`POST /api/v1/license/verify`).
+
+Mint a key for a new sale:
+
+```sh
+node scripts/gen-pro-license.js <serial>   # serial = your sale record, keys are deterministic per serial
+```
+
+API surface: `POST /s/:token/access` (form unlock), `POST
+/api/v1/shares/:token/unlock` (JSON unlock → `accessToken` grant), `POST
+/api/v1/license/verify`. See `backend/migrate-pro.sql` for the D1 additions.
 
 ## License
 
