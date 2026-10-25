@@ -287,8 +287,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.addButton(withTitle: "Revoke")
         alert.addButton(withTitle: "Cancel")
         presentAlert(alert) { [weak self] response in
-            guard response == .alertFirstButtonReturn else { return }
-            Task { await self?.revoke(link) }
+            guard let self, response == .alertFirstButtonReturn else { return }
+            Task { await self.revoke(link) }
         }
     }
 
