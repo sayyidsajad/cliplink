@@ -18,7 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var monitor: ClipboardMonitor!
 
     var statusItem: NSStatusItem!
-    var statusLine = "Starting…"
+    var statusLine = "Starting…" {
+        didSet { statusItem?.button?.toolTip = statusLine }
+    }
 
     var onboardingWindowController: OnboardingWindowController?
     var preferencesWindowController: PreferencesWindowController?
@@ -140,10 +142,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
         // BYO storage (v0.4+): files live in the user's own Google Drive.
-        staticTitle(menu, title: settings.isDriveConnected
-            ? "Storage: your own Google Drive (\(settings.driveEmail))"
-            : "Storage: no Drive connected")
-        menu.addItem(actionItem("Connect Google Drive…", #selector(connectDriveAction(_:))))
+        let storageItem = NSMenuItem()
+        storageItem.isEnabled = false
+        if settings.isDriveConnected {
+            storageItem.attributedTitle = driveConnectedTitle(settings.driveEmail)
+        } else {
+            storageItem.title = "Storage: no Drive connected — click below to connect"
+        }
+        menu.addItem(storageItem)
+        menu.addItem(actionItem(settings.isDriveConnected ? "Reconnect Google Drive…" : "Connect Google Drive…", #selector(connectDriveAction(_:))))
 
         menu.addItem(.separator())
         let backend = NSMenuItem()
@@ -168,7 +175,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(actionItem("Preferences…", #selector(showPreferences(_:))))
         menu.addItem(actionItem("How ClipLink Works…", #selector(showAbout(_:))))
         menu.addItem(.separator())
-        menu.addItem(actionItem("Quit ClipLink", #selector(NSApplication.terminate(_:))))
+        // Route quit through quitApp: a bare #selector(NSApplication.terminate(_:))
+        // with target=self pointed at a method the AppDelegate doesn't own,
+        // which made the menu item a silent no-op (the "Quit does nothing" bug).
+        menu.addItem(actionItem("Quit ClipLink", #selector(quitApp(_:))))
+    }
+
+    /// Green "● Connected" line for the menu — the plain text alone read like
+    /// a static caption, so the connect state was easy to miss.
+    private func driveConnectedTitle(_ email: String) -> NSAttributedString {
+        let dot = NSAttributedString(
+            string: "● ",
+            attributes: [.foregroundColor: NSColor.systemGreen, .font: NSFont.systemFont(ofSize: 13)]
+        )
+        let shownEmail = email.isEmpty ? "Drive" : email
+        let text = NSAttributedString(
+            string: "Storage: connected — your own Google Drive (\(shownEmail))",
+            attributes: [.foregroundColor: NSColor.labelColor, .font: NSFont.systemFont(ofSize: 13)]
+        )
+        let out = NSMutableAttributedString(attributedString: dot)
+        out.append(text)
+        return out
+    }
+
+    @objc func quitApp(_ sender: Any?) {
+        statusItem?.button?.highlight(false)
+        NSApp.terminate(nil)
     }
 
     private func menuItem(_ title: String, _ sel: Selector, object: Any?) -> NSMenuItem {
@@ -254,9 +286,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.informativeText = "The file is deleted immediately and the public link stops working for everyone."
         alert.addButton(withTitle: "Revoke")
         alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: activeWindow()) { response in
+        presentAlert(alert) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
-            Task { await self.revoke(link) }
+            Task { await self?.revoke(link) }
         }
     }
 
@@ -269,7 +301,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if (response as? HTTPURLResponse)?.statusCode == 200 {
-                statusLine = "Revoked \(link.filename)"
+                history.remove(link.token) // link vanishes from Recent links immediately
+                statusLine = "Revoked \(link.filename) — file deleted"
                 notifier.notifySuccess(title: "ClipLink", message: "Revoked and deleted \(link.filename).")
             } else {
                 throw URLError(.badServerResponse)
@@ -277,6 +310,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } catch {
             statusLine = "Revocation failed for \(link.filename)"
             notifier.notifyFailure(title: "ClipLink", message: "Could not revoke \(link.filename). Check connection and try again.")
+        }
+    }
+
+    /// Presents an alert without fabricating a throwaway window: sheets need a
+    /// real on-screen window; otherwise fall back to a classic modal dialog.
+    private func presentAlert(_ alert: NSAlert, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        let host = NSApp.keyWindow
+            ?? preferencesWindowController?.window
+            ?? onboardingWindowController?.window
+        if let host {
+            alert.beginSheetModal(for: host) { completion($0) }
+        } else {
+            completion(alert.runModal())
         }
     }
 
@@ -372,10 +418,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let poll = try await self.driveConnect.pollUntilConnected(backend: backend, installID: installID, state: start.state)
                 await MainActor.run {
                     if let poll = poll, poll.connected {
+                        // Persist FIRST so every reader (menu, onboarding,
+                        // uploads) agrees, then repaint the surfaces.
                         self.settings.driveConnectionID = poll.connectionId ?? ""
                         self.settings.driveEmail = poll.email ?? ""
                         self.onboardingWindowController?.setDriveConnected(poll.email)
-                        self.statusLine = "Google Drive connected ✓ \(poll.email ?? "")"
+                        self.statusLine = "Google Drive connected ✓ \(poll.email ?? "your account")"
+                        Task { await self.refreshDriveGate(force: true) }
                     } else {
                         self.onboardingWindowController?.setDriveTimedOut()
                         self.statusLine = "Drive connect not completed — try again from the menu-bar icon"
@@ -401,7 +450,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         driveRequired = pipeline.limits?.storageProvider == "drive"
         await MainActor.run {
-            onboardingWindowController?.applyDriveState(required: driveRequired, connected: settings.isDriveConnected)
+            onboardingWindowController?.applyDriveState(
+                required: driveRequired,
+                connected: settings.isDriveConnected,
+                email: settings.driveEmail.isEmpty ? nil : settings.driveEmail
+            )
         }
     }
 
@@ -445,7 +498,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.onConnectDrive = { [weak self] in
             self?.startDriveConnect()
         }
-        controller.applyDriveState(required: driveRequired, connected: settings.isDriveConnected)
+        controller.applyDriveState(
+            required: driveRequired,
+            connected: settings.isDriveConnected,
+            email: settings.driveEmail.isEmpty ? nil : settings.driveEmail
+        )
         controller.onStart = { [weak self] in
             guard let self else { return }
             Task { await self.notifier.requestAuthorization() }

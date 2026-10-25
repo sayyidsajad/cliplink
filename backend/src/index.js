@@ -549,8 +549,12 @@ async function handleConnectPoll(request, env, url) {
   const conn = await latestConnection(env, session.owner_install_id, "drive");
   if (conn && conn.created_at >= session.created_at - 2000) {
     await env.DB.prepare("DELETE FROM oauth_sessions WHERE state = ?1").bind(state).run();
-    const email = await revealAccountEmail(env, conn.account_label);
-    return json({ connected: true, provider: "drive", connectionId: conn.id, email });
+    // The connection itself is what matters; a failed/forgotten e-mail label
+    // must NOT turn this into a 500 (the app would believe connect failed).
+    let email = null;
+    try { email = await revealAccountEmail(env, conn.account_label); } catch { email = null; }
+    const safeEmail = typeof email === "string" ? email : null;
+    return json({ connected: true, provider: "drive", connectionId: conn.id || "", email: safeEmail });
   }
   return json({ connected: false });
 }

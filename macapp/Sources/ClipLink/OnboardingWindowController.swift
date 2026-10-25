@@ -159,12 +159,22 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     /// Pure UI state plumbing used by AppDelegate: `required` reflects the
     /// backend's advertised storageProvider, `connected` our stored state.
-    func applyDriveState(required: Bool, connected: Bool) {
+    func applyDriveState(required: Bool, connected: Bool, email: String? = nil) {
         driveRequired = required
         driveConnected = connected
-        if connected && driveStatusLabel.stringValue == "Not connected" {
-            driveStatusLabel.stringValue = "Connected ✓"
+        if connected {
+            // Always repaint when connected — we get here after fresh connects
+            // AND when re-opening the window while already connected.
+            if let email, !email.isEmpty {
+                driveStatusLabel.stringValue = "Connected ✓ (\(email))"
+            } else {
+                driveStatusLabel.stringValue = "Connected ✓"
+            }
             driveStatusLabel.textColor = NSColor.systemGreen
+        } else if !driveBusy && driveStatusLabel.textColor == NSColor.systemGreen {
+            // Stale connected state from a previous session: reset it.
+            driveStatusLabel.stringValue = "Not connected"
+            driveStatusLabel.textColor = NSColor.secondaryLabelColor
         }
         refreshDriveUI()
     }

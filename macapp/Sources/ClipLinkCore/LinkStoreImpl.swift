@@ -28,6 +28,13 @@ public final class LinkStore {
         save()
     }
 
+    /// Drops one link from history (used right after a successful revoke so
+    /// the entry disappears from Recent links immediately).
+    public func remove(_ token: String) {
+        links.removeAll { $0.token == token }
+        save()
+    }
+
     private func load() {
         guard let data = d.data(forKey: key) else { return }
         if let decoded = try? JSONDecoder().decode([StoredLink].self, from: data) {
