@@ -176,7 +176,20 @@ export function makeDriveStorage(env, connectionRecord) {
         }
       );
       if (!sessionRes.ok) {
-        throw new StorageError(sessionRes.status, `drive_session_failed (${sessionRes.status})`);
+        let detail = `drive_session_failed (${sessionRes.status})`;
+        const bodyText = await sessionRes.text().catch(() => "");
+        if (bodyText) {
+          try {
+            const parsed = JSON.parse(bodyText);
+            const err = parsed.error || {};
+            // e.g. 403 { error: { errors: [{reason: "quotaExceeded"}], message: "..." } }
+            const reason = (err.errors && err.errors[0] && err.errors[0].reason) || err.status || "";
+            detail += reason ? ` [${reason}] ${err.message || ""}` : ` ${bodyText.slice(0, 300)}`;
+          } catch {
+            detail += ` ${bodyText.slice(0, 300)}`;
+          }
+        }
+        throw new StorageError(sessionRes.status, detail);
       }
       const sessionUrl = sessionRes.headers.get("location");
       if (!sessionUrl) throw new StorageError(502, "drive_session_missing_location");
