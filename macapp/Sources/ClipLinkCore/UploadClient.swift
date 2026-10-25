@@ -20,6 +20,9 @@ public struct ShareCreation: Codable, Sendable, Equatable {
     public let size: Int64?
     public let expiresAt: Int64
     public let revokeToken: String
+    /// v0.5+: present when the share carries a Pro password (optional for
+    /// older backends).
+    public let protected: Bool?
 }
 
 public enum ClipLinkAPIError: Error, LocalizedError, Sendable {
@@ -29,6 +32,8 @@ public enum ClipLinkAPIError: Error, LocalizedError, Sendable {
     case rateLimited(retrySeconds: Int)
     case httpsRequired
     case driveNotConnected
+    case proRequired
+    case proLicenseInvalid(String)
     case invalidResponse(String)
     case server(status: Int, message: String)
 
@@ -48,6 +53,12 @@ public enum ClipLinkAPIError: Error, LocalizedError, Sendable {
             return "The server requires HTTPS uploads in production."
         case .driveNotConnected:
             return "No Google Drive is connected yet. Open the ClipLink menu-bar icon → Connect Google Drive…"
+        case .proRequired:
+            return "That's a ClipLink Pro feature. Activate Pro in Preferences (one-time purchase)."
+        case .proLicenseInvalid(let reason):
+            return reason.contains("too many Macs")
+                ? "This Pro license is in use on too many Macs already."
+                : "Your ClipLink Pro license is not valid — re-enter it in Preferences."
         case .invalidResponse(let detail):
             return "Unexpected response from the backend. \(detail)"
         case .server(let status, let message):
@@ -131,6 +142,9 @@ public final class UploadClient: NSObject, @unchecked Sendable {
         backend: URL,
         filename: String,
         installID: String,
+        licenseKey: String? = nil,
+        expiryHours: Int? = nil,
+        linkPassword: String? = nil,
         maxAttempts: Int = 3,
         onProgress: ProgressHandler? = nil
     ) async throws -> ShareCreation {
@@ -143,6 +157,15 @@ public final class UploadClient: NSObject, @unchecked Sendable {
             forHTTPHeaderField: "X-ClipLink-Filename"
         )
         request.setValue(installID, forHTTPHeaderField: "X-ClipLink-Install")
+        if let licenseKey, !licenseKey.isEmpty {
+            request.setValue(licenseKey, forHTTPHeaderField: "X-ClipLink-License")
+        }
+        if let expiryHours, expiryHours > 0 {
+            request.setValue(String(expiryHours), forHTTPHeaderField: "X-ClipLink-Expiry-Hours")
+        }
+        if let linkPassword, !linkPassword.isEmpty {
+            request.setValue(linkPassword, forHTTPHeaderField: "X-ClipLink-Link-Password")
+        }
 
         var lastError: ClipLinkAPIError?
         var delay: TimeInterval = 1.5
@@ -193,6 +216,8 @@ public final class UploadClient: NSObject, @unchecked Sendable {
         switch status {
         case 413: return .tooLarge(limitBytes: 0)
         case 429: return .rateLimited(retrySeconds: 60)
+        case 403 where body?.error.code == "pro_required": return .proRequired
+        case 403 where body?.error.code == "pro_license_invalid": return .proLicenseInvalid(message)
         case 403 where body?.error.code == "drive_not_connected" || message.contains("Connect Google Drive"):
             return .driveNotConnected
         case 403 where message.contains("HTTPS"): return .httpsRequired

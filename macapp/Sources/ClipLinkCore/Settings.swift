@@ -22,6 +22,11 @@ public final class Settings: @unchecked Sendable {
         static let blockedPatterns = "cliplink.blockedPatterns"
         static let driveConnectionID = "cliplink.driveConnectionID"
         static let driveEmail = "cliplink.driveEmail"
+        static let licenseKey = "cliplink.licenseKey"
+        static let proActive = "cliplink.proActive"
+        static let linkExpiresHours = "cliplink.linkExpiresHours"
+        static let protectionEnabled = "cliplink.protectionEnabled"
+        static let linkPassword = "cliplink.linkPassword"
     }
 
     /// Monitoring only turns on after first-run onboarding (FR-08).
@@ -112,4 +117,40 @@ public final class Settings: @unchecked Sendable {
     }
 
     public var isDriveConnected: Bool { !driveConnectionID.isEmpty }
+
+    // MARK: ClipLink Pro (one-time license) + per-link upgrades
+
+    /// The presented Pro license key (not a cloud secret — a purchase token).
+    public var licenseKey: String {
+        get { d.string(forKey: Key.licenseKey) ?? "" }
+        set { d.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), forKey: Key.licenseKey) }
+    }
+
+    /// True after the backend verified the key at least once.
+    public var proActive: Bool {
+        get { d.bool(forKey: Key.proActive) }
+        set { d.set(newValue, forKey: Key.proActive) }
+    }
+
+    /// Per-link expiry override in hours (0 = server default, 168 = 1 week,
+    /// 720 = 30 days). Pro feature — enforced server-side.
+    public var linkExpiresHours: Int {
+        get { d.object(forKey: Key.linkExpiresHours) == nil ? 0 : d.integer(forKey: Key.linkExpiresHours) }
+        set { d.set(newValue, forKey: Key.linkExpiresHours) }
+    }
+
+    /// Whether new uploads are password-protected, and with what. The
+    /// password lives here for convenience (it is not a cloud secret); the
+    /// server stores only a PBKDF2 hash.
+    public var protectionEnabled: Bool {
+        get { d.bool(forKey: Key.protectionEnabled) }
+        set { d.set(newValue, forKey: Key.protectionEnabled) }
+    }
+
+    public var linkPassword: String {
+        get { d.string(forKey: Key.linkPassword) ?? "" }
+        set { d.set(newValue, forKey: Key.linkPassword) }
+    }
+
+    public var isProEligible: Bool { proActive && !licenseKey.isEmpty }
 }

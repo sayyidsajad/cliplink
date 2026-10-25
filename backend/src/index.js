@@ -30,13 +30,15 @@
  *    Supabase project is retired.
  */
 
-import { sharePage, errorPage, humanBytes } from "./page.js";
+import { sharePage, errorPage, protectedSharePage, humanBytes } from "./page.js";
 import { makeStorage, storageKeepAlive } from "./supabase.js";
 import {
   makeDriveStorage, buildAuthorizeUrl, exchangeCode, sealConnection,
   revealAccountEmail, newId, StorageError, fetchAccountEmail,
 } from "./drive.js";
 import { makeMockStorage } from "./mock.js";
+import { hashPassword, verifyPassword, signAccessGrant, verifyAccessGrant } from "./crypto.js";
+import { checkLicense } from "./license.js";
 
 const TOKEN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 const TOKEN_REGEX = /^[A-Za-z0-9_-]{8,64}$/;
@@ -163,7 +165,7 @@ function timingSafeEqual(a, b) {
 
 async function getShareRow(env, token) {
   return (await env.DB.prepare(
-    "SELECT token, revoke_token, object_key, filename, size, created_at, expires_at, revoked, object_deleted, downloads, provider, connection_id FROM shares WHERE token = ?1"
+    "SELECT token, revoke_token, object_key, filename, size, created_at, expires_at, revoked, object_deleted, downloads, provider, connection_id, password_salt, password_hash FROM shares WHERE token = ?1"
   ).bind(token).first()) ?? null;
 }
 
@@ -405,6 +407,31 @@ async function byoUpload(request, env, cfg, u) {
     throw new ApiError(403, provider === "drive" ? "drive_not_connected" : "not_connected", hintText);
   }
 
+  // ---- ClipLink Pro features (one-time license; no subscription) ----
+  const licenseKey = request.headers.get("X-ClipLink-License") || null;
+  const expiryHoursRaw = Number(request.headers.get("X-ClipLink-Expiry-Hours") || "");
+  const customExpiryHours = (Number.isFinite(expiryHoursRaw) && expiryHoursRaw > 0 && expiryHoursRaw <= 720
+    && Math.round(expiryHoursRaw) !== Math.round(cfg.expiryMs / 3600000))
+    ? Math.round(expiryHoursRaw) : null;
+  const linkPassword = (request.headers.get("X-ClipLink-Link-Password") || "").slice(0, 200) || null;
+  if (customExpiryHours || linkPassword) {
+    if (!licenseKey) {
+      throw new ApiError(403, "pro_required", "Password-protected links and custom expiry are ClipLink Pro features.");
+    }
+    const lic = await checkLicense(env, u.install, licenseKey);
+    if (!lic.active) {
+      throw new ApiError(403, "pro_license_invalid",
+        lic.reason === "install_limit"
+          ? "This license is in use on too many Macs already."
+          : "This ClipLink Pro license is not valid.");
+    }
+  }
+  const expiryMs = customExpiryHours ? customExpiryHours * 3600000 : cfg.expiryMs;
+  const expiresAt = u.now + expiryMs;
+  // Password is checked at unlock time only: we keep a PBKDF2 hash, and the
+  // plaintext never persists anywhere (not even in our logs).
+  const pwRecord = linkPassword ? await hashPassword(linkPassword) : null;
+
   const storage = provider === "drive" ? makeDriveStorage(env, connection) : makeMockStorage(env);
 
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -426,9 +453,11 @@ async function byoUpload(request, env, cfg, u) {
       await env.DB.prepare(
         `INSERT INTO shares
            (token, revoke_token, object_key, filename, size, created_at, expires_at,
-            revoked, object_deleted, owner_install_id, source_ip, downloads, provider, connection_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, ?8, ?9, 0, ?10, ?11)`
-      ).bind(token, revokeToken, objectKey, u.filename, put.size, u.now, u.expiresAt, u.install, u.ip, provider, connection.id).run();
+            revoked, object_deleted, owner_install_id, source_ip, downloads, provider,
+            connection_id, password_salt, password_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0, ?8, ?9, 0, ?10, ?11, ?12, ?13)`
+      ).bind(token, revokeToken, objectKey, u.filename, put.size, u.now, expiresAt, u.install, u.ip,
+        provider, connection.id, pwRecord && pwRecord.saltB64, pwRecord && pwRecord.hashB64).run();
     } catch (e) {
       if (/UNIQUE/i.test(String(e && e.message))) {
         // collision: remove the just-uploaded file and try a fresh token
@@ -445,7 +474,7 @@ async function byoUpload(request, env, cfg, u) {
 
     const url = `${publicOrigin(cfg, request)}/s/${token}`;
     return json(
-      { url, token, filename: u.filename, size: put.size, expiresAt: u.expiresAt, expiresInHours: Math.round(cfg.expiryMs / 3600000), revokeToken },
+      { url, token, filename: u.filename, size: put.size, expiresAt, expiresInHours: Math.round(expiryMs / 3600000), revokeToken, protected: Boolean(pwRecord) },
       201
     );
   }
@@ -602,6 +631,7 @@ async function handleMetadata(env, token) {
     expiresAt: row.expires_at,
     downloads: row.downloads,
     downloadPath: `/api/v1/shares/${token}/download`,
+    protected: Boolean(row.password_hash),
   });
 }
 
@@ -618,8 +648,38 @@ function parseRange(header) {
   return { offset: Number.parseInt(m[1], 10), length: undefined };
 }
 
+// ------------------------------------------------- ClipLink Pro: password gate
+
+const ACCESS_COOKIE_PREFIX = "cpa_";
+
+function cookieNameFor(token) {
+  return ACCESS_COOKIE_PREFIX + token.replace(/[^A-Za-z0-9]/g, "");
+}
+
+function readCookie(request, name) {
+  const header = request.headers.get("Cookie") || "";
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx > 0 && part.slice(0, idx).trim() === name) return part.slice(idx + 1).trim();
+  }
+  return null;
+}
+
+/** True iff this share is protected and the caller lacks a valid unlock grant. */
+async function needsUnlock(request, env, row) {
+  if (!row.password_hash) return false;
+  const name = cookieNameFor(row.token);
+  const grant = readCookie(request, name) || request.headers.get("X-ClipLink-Access") || "";
+  return !(await verifyAccessGrant(env, row.token, grant));
+}
+
 async function handleDownload(request, env, token, ctx) {
   const row = await shareStatus(env, token);
+  if (await needsUnlock(request, env, row)) {
+    // Keep it cheap and non-echoing: browsers that reach the API directly get
+    // the same hint every time; the human path is the /s/ password page.
+    throw new ApiError(401, "password_required", "This share is password-protected. Unlock via the share page (or POST /api/v1/shares/:t/unlock).");
+  }
   const rangeHeader = request.headers.get("Range");
   if (row.size === 0) throw new ApiError(410, "gone", "This file is no longer available.");
   const range = rangeHeader ? parseRange(rangeHeader) : null;
@@ -767,7 +827,62 @@ export default {
         const token = decodeURIComponentSafe(parts[1]);
         if (!TOKEN_REGEX.test(token)) throw new ApiError(400, "invalid_token", "Malformed share token.");
         const row = await shareStatus(env, token);
+        const url = new URL(request.url);
+        if (row.password_hash) {
+          const granted = !(await needsUnlock(request, env, row));
+          if (!granted) {
+            return html(protectedSharePage({ token, wrongPassword: url.searchParams.get("e") === "1" }));
+          }
+        }
         return html(sharePage({ filename: row.filename, size: row.size, expiresAt: row.expires_at, now: Date.now(), token }));
+      }
+      if (parts.length === 3 && parts[0] === "s" && parts[2] === "access" && request.method === "POST") {
+        const token = decodeURIComponentSafe(parts[1]);
+        if (!TOKEN_REGEX.test(token)) throw new ApiError(400, "invalid_token", "Malformed share token.");
+        const row = await shareStatus(env, token);
+        const origin = publicOrigin(cfg, request);
+        if (!row.password_hash) return Response.redirect(`${origin}/s/${token}`, 303);
+        const form = await request.formData().catch(() => null);
+        const pw = form ? String(form.get("password") || "") : "";
+        const grant = await signAccessGrant(env, token);
+        if (pw && await verifyPassword(pw, row.password_salt, row.password_hash)) {
+          return new Response(null, {
+            status: 303,
+            headers: {
+              Location: `${origin}/s/${token}`,
+              "Set-Cookie": `${cookieNameFor(token)}=${grant.grant}; Path=/; HttpOnly; SameSite=Lax; Max-Age=900`,
+              "Cache-Control": "no-store",
+            },
+          });
+        }
+        return Response.redirect(`${origin}/s/${token}?e=1`, 303);
+      }
+      if (parts.length === 5 && parts[0] === "api" && parts[1] === "v1" && parts[2] === "shares" && parts[4] === "unlock" && request.method === "POST") {
+        const token = decodeURIComponentSafe(parts[3]);
+        if (!TOKEN_REGEX.test(token)) throw new ApiError(400, "invalid_token", "Malformed share token.");
+        const row = await shareStatus(env, token);
+        if (!row.password_hash) return json({ ok: true });
+        const body = await request.json().catch(() => ({}));
+        const pw = String(body.password ?? body.pw ?? "");
+        if (!pw || !(await verifyPassword(pw, row.password_salt, row.password_hash))) {
+          throw new ApiError(401, "wrong_password", "Incorrect password for this share.");
+        }
+        const grant = await signAccessGrant(env, token);
+        const headers = {
+          "Set-Cookie": `${cookieNameFor(token)}=${grant.grant}; Path=/; HttpOnly; SameSite=Lax; Max-Age=900`,
+          "Cache-Control": "no-store",
+        };
+        return json({ ok: true, accessToken: grant.grant }, 200, headers);
+      }
+      if (path === "/api/v1/license/verify" && request.method === "POST") {
+        const installHeader = request.headers.get("X-ClipLink-Install") || "";
+        const install = INSTALL_REGEX.test(installHeader) ? installHeader : null;
+        const body = await request.json().catch(() => ({}));
+        const result = await checkLicense(env, install, String(body.licenseKey ?? body.license ?? ""));
+        if (!result.active) {
+          return json({ active: false, reason: result.reason }, 200);
+        }
+        return json({ active: true, plan: "pro", maxInstalls: env.LICENSE_KEY_SEED ? 5 : null, keyId: result.keyId });
       }
       throw new ApiError(404, "not_found", "Unknown path.");
     } catch (e) {

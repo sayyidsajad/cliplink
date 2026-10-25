@@ -115,15 +115,28 @@ public final class UploadPipeline {
     }
 
     private func uploadOne(_ file: CopiedFile, now: Int64) async throws -> StoredLink {
-        let creation = try await client.upload(
-            fileURL: file.url,
-            backend: settings.backendURL,
-            filename: file.name,
-            installID: settings.installID
-        ) { [weak self] fraction in
-            Task { @MainActor [weak self] in
-                self?.progressSink?(fraction, file.name)
+        let creation: ShareCreation
+        do {
+            creation = try await client.upload(
+                fileURL: file.url,
+                backend: settings.backendURL,
+                filename: file.name,
+                installID: settings.installID,
+                licenseKey: settings.isProEligible ? settings.licenseKey : nil,
+                expiryHours: settings.isProEligible ? settings.linkExpiresHours : nil,
+                linkPassword: settings.isProEligible && settings.protectionEnabled
+                    ? settings.linkPassword : nil
+            ) { [weak self] fraction in
+                Task { @MainActor [weak self] in
+                    self?.progressSink?(fraction, file.name)
+                }
             }
+        } catch let error as ClipLinkAPIError {
+            if case .proLicenseInvalid = error {
+                // Auto-downgrade: the key stopped verifying (limit/revocation).
+                settings.proActive = false
+            }
+            throw error
         }
         return StoredLink(
             token: creation.token,
@@ -132,7 +145,8 @@ public final class UploadPipeline {
             size: creation.size ?? 0,
             createdAt: now,
             expiresAt: creation.expiresAt,
-            revokeToken: creation.revokeToken
+            revokeToken: creation.revokeToken,
+            protected: creation.protected ?? false
         )
     }
 }

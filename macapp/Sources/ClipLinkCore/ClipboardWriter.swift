@@ -18,4 +18,14 @@ public enum ClipboardWriter {
         pasteboard.setString(string, forType: .string)
         return pasteboard.changeCount
     }
+
+    /// Replaces clipboard contents with raw image bytes (PNG) — used for the
+    /// per-link QR code. Returns the new pasteboard changeCount.
+    @discardableResult
+    public static func writeImage(_ pngData: Data) -> Int {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setData(pngData, forType: .png)
+        return pasteboard.changeCount
+    }
 }

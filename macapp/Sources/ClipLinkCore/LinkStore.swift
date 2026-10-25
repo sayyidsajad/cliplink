@@ -9,9 +9,12 @@ public struct StoredLink: Codable, Sendable, Hashable {
     public let createdAt: Int64
     public let expiresAt: Int64
     public let revokeToken: String
+    /// v0.5+: share is password-protected (server confirmed). Optional so
+    /// older persisted history decodes unchanged.
+    public let protected: Bool?
 
     public init(token: String, url: String, filename: String, size: Int64,
-                createdAt: Int64, expiresAt: Int64, revokeToken: String) {
+                createdAt: Int64, expiresAt: Int64, revokeToken: String, protected: Bool? = nil) {
         self.token = token
         self.url = url
         self.filename = filename
@@ -19,6 +22,7 @@ public struct StoredLink: Codable, Sendable, Hashable {
         self.createdAt = createdAt
         self.expiresAt = expiresAt
         self.revokeToken = revokeToken
+        self.protected = protected
     }
 }
 

@@ -49,3 +49,11 @@ CREATE TABLE IF NOT EXISTS mock_blobs (
   token TEXT PRIMARY KEY,
   data  TEXT NOT NULL                        -- base64
 );
+
+-- ---------------------------------------------------------------- ClipLink Pro (v0.5+, one-time license)
+CREATE TABLE IF NOT EXISTS licenses (
+  key_id  TEXT PRIMARY KEY,        -- non-reversible id of the presented key (never the raw key)
+  installs  TEXT                   -- JSON array of install ids bound to this key (≤ 5)
+, first_seen_at INTEGER NOT NULL
+, last_check_at INTEGER
+);

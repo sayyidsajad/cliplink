@@ -1,5 +1,6 @@
 import AppKit
 import ClipLinkCore
+import CoreImage.CIFilterBuiltins
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let settings = Settings()
@@ -115,17 +116,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             staticTitle(menu, title: "  Nothing shared yet — copy a file in Finder")
         }
         for link in history.links.prefix(10) {
+            let lock = (link.protected ?? false)
             let item = NSMenuItem()
-            item.title = "\(link.filename) · \(Format.bytes(link.size)) · \(Format.relativeExpiry(expiresAtMillis: link.expiresAt))"
+            item.title = "\(lock ? "🔒 " : "")\(link.filename) · \(Format.bytes(link.size)) · \(Format.relativeExpiry(expiresAtMillis: link.expiresAt))"
             let sub = NSMenu()
             sub.autoenablesItems = false
             sub.addItem(menuItem("Copy Link", #selector(copyLink(_:)), object: link.url))
+            sub.addItem(menuItem("Copy QR Code (PNG)", #selector(copyQR(_:)), object: link.url))
             sub.addItem(menuItem("Open Download Page", #selector(openLink(_:)), object: link.url))
             sub.addItem(.separator())
             sub.addItem(menuItem("Revoke (delete hosted file)", #selector(revokeLink(_:)), object: link.token))
             sub.addItem(.separator())
             let note = NSMenuItem()
-            note.title = "Uploaded \(Format.shortDate(link.createdAt)) · expires \(Format.shortDate(link.expiresAt))"
+            note.title = "Uploaded \(Format.shortDate(link.createdAt)) · expires \(Format.shortDate(link.expiresAt))" + (lock ? " · password-protected" : "")
             note.isEnabled = false
             sub.addItem(note)
             item.submenu = sub
@@ -211,6 +214,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let url = sender.representedObject as? String else { return }
         ClipboardWriter.write(url)
         statusLine = "Link copied to clipboard"
+    }
+
+    @objc func copyQR(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? String else { return }
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(url.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage else {
+            statusLine = "Could not build the QR code"
+            return
+        }
+        // 8× scale ≈ 290px for a short URL — crisp on Retina, scannable from a screenshot too.
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
+        let rep = NSCIImageRep(ciImage: scaled)
+        let image = NSImage(size: rep.size)
+        image.addRepresentation(rep)
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else {
+            statusLine = "Could not render the QR code"
+            return
+        }
+        ClipboardWriter.writeImage(png)
+        statusLine = "QR code copied as PNG — paste it anywhere"
     }
 
     @objc func openLink(_ sender: NSMenuItem) {

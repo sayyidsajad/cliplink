@@ -104,6 +104,19 @@ export function sharePage({ filename, size, expiresAt, now, token }) {
 <a class="btn" href="/api/v1/shares/${encodeURIComponent(token)}/download">Download file</a>`);
 }
 
+export function protectedSharePage({ token, wrongPassword = false }) {
+  return page("ClipLink — protected file", `
+<h1>This file is password-protected</h1>
+<div class="file">🔒 Protected share</div>
+${wrongPassword ? '<div class="banner warn">Wrong password — try again.</div>' : ""}
+<form method="post" action="/s/${encodeURIComponent(token)}/access">
+  <div class="meta"><div>Password <span><input name="password" type="password" autocomplete="off"
+    style="background:#0e1016;color:#e8eaf1;border:1px solid #2b3242;border-radius:8px;padding:8px 10px;font-size:14px"></span></div></div>
+  <button class="btn" type="submit">Unlock &amp; download</button>
+</form>
+<div class="meta"><div>&nbsp;<span>Ask the person who shared this for the password.</span></div></div>`);
+}
+
 export function errorPage({ status, title, message }) {
   return page(`ClipLink — ${title}`, `
 <h1>ClipLink</h1>
