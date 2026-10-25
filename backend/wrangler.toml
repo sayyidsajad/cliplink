@@ -5,9 +5,11 @@ name = "api"
 main = "src/index.js"
 compatibility_date = "2025-09-01"
 
-# ---- storage ----
-# Blobs live in Supabase Storage (cardless free tier) — see src/supabase.js.
-# Secrets (SUPABASE_URL, SUPABASE_SERVICE_KEY) are `wrangler secret put` items.
+# ---- storage (BYO, v0.4+) ----
+# Files live in THE USER'S OWN Google Drive; the Worker stores metadata only.
+# Secrets: SUPABASE_URL/SUPABASE_SERVICE_KEY (legacy expiry), DRIVE_CLIENT_ID,
+# DRIVE_CLIENT_SECRET, TOKEN_SECRET — all `wrangler secret put` items.
+# STORAGE_PROVIDER: "drive" (prod) · "mock" (dev/CI) · "supabase" (legacy).
 
 [[d1_databases]]
 binding = "DB"
@@ -21,8 +23,8 @@ crons = ["*/10 * * * *"]
 
 # ---- limits (server-enforced; the Mac app treats them as advisory) ----
 [vars]
-STORAGE_BUCKET = "cliplink-files"
-MAX_FILE_MB = "49"           # max upload size per file (Supabase free tier caps objects at 50 MB)
+STORAGE_PROVIDER = "drive"   # files live in the user's own Google Drive
+MAX_FILE_MB = "99"           # your Worker streams bytes; user's Drive quota is the real cap
 EXPIRY_HOURS = "24"          # link lifetime (integer hours)
 # EXPIRY_MINUTES overrides EXPIRY_HOURS when set (used by tests)
 RATE_LIMIT_UPLOADS = "30"    # uploads per identity per window

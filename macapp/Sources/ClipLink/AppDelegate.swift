@@ -5,6 +5,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let settings = Settings()
     let history = LinkStore()
     let notifier = SystemNotifier()
+    let driveConnect = DriveConnectClient()
+
+    /// Whether the backend requires a Drive connection before uploads work
+    /// (storageProvider == "drive"). Resolved from /api/v1/limits.
+    var driveRequired = false
+    /// Guards against double-starting a connect flow from menu + onboarding.
+    var driveConnecting = false
 
     lazy var pipeline: UploadPipeline = UploadPipeline(settings: settings)
     var monitor: ClipboardMonitor!
@@ -129,6 +136,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        // BYO storage (v0.4+): files live in the user's own Google Drive.
+        staticTitle(menu, title: settings.isDriveConnected
+            ? "Storage: your own Google Drive (\(settings.driveEmail))"
+            : "Storage: no Drive connected")
+        menu.addItem(actionItem("Connect Google Drive…", #selector(connectDriveAction(_:))))
+
+        menu.addItem(.separator())
         let backend = NSMenuItem()
         backend.title = "Backend"
         let backendSub = NSMenu()
@@ -210,7 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               let link = history.links.first(where: { $0.token == token }) else { return }
         let alert = NSAlert()
         alert.messageText = "Revoke \(link.filename)?"
-        alert.informativeText = "The hosted file is deleted immediately and the public link stops working for everyone."
+        alert.informativeText = "The file is deleted immediately and the public link stops working for everyone."
         alert.addButton(withTitle: "Revoke")
         alert.addButton(withTitle: "Cancel")
         alert.beginSheetModal(for: activeWindow()) { response in
@@ -261,9 +275,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func applyBackend(_ raw: String) {
         settings.backendURLString = raw
+        // The Drive connection is bound to the previous backend's records:
+        // switching invalidates it (a reconnect is required before uploads).
+        settings.driveConnectionID = ""
+        settings.driveEmail = ""
         pipeline.resetLimits()
         statusLine = "Backend set to \(settings.backendURL.absoluteString)"
         Task { await pipeline.refreshLimits(force: true) }
+        Task { await refreshDriveGate(force: true) }
     }
 
     @objc func checkLimits(_ sender: Any?) {
@@ -293,6 +312,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     alert.runModal()
                 }
             }
+        }
+    }
+
+    // MARK: - BYO Google Drive connect (v0.4+)
+
+    /// Opens the Google consent page in the browser, then polls the backend
+    /// until the connection is confirmed. Session is bound to this install
+    /// id; the app never receives any token (backend stores it sealed).
+    @objc func connectDriveAction(_ sender: Any?) {
+        startDriveConnect()
+    }
+
+    func startDriveConnect() {
+        guard !driveConnecting else { return }
+        driveConnecting = true
+        onboardingWindowController?.setDriveBusy(true)
+        statusLine = "Waiting for Google Drive consent…"
+        Task { [weak self] in
+            guard let self else { return }
+            let backend = self.settings.backendURL
+            let installID = self.settings.installID
+            do {
+                let start = try await self.driveConnect.start(backend: backend, installID: installID)
+                guard let url = URL(string: start.authorizeUrl) else {
+                    throw DriveConnectError.invalidResponse("authorize URL was malformed")
+                }
+                await MainActor.run {
+                    NSWorkspace.shared.open(url)
+                    self.statusLine = "Waiting for Google Drive consent…"
+                }
+                let poll = try await self.driveConnect.pollUntilConnected(backend: backend, installID: installID, state: start.state)
+                await MainActor.run {
+                    if let poll = poll, poll.connected {
+                        self.settings.driveConnectionID = poll.connectionId ?? ""
+                        self.settings.driveEmail = poll.email ?? ""
+                        self.onboardingWindowController?.setDriveConnected(poll.email)
+                        self.statusLine = "Google Drive connected ✓ \(poll.email ?? "")"
+                    } else {
+                        self.onboardingWindowController?.setDriveTimedOut()
+                        self.statusLine = "Drive connect not completed — try again from the menu-bar icon"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.onboardingWindowController?.setDriveError("\(error.localizedDescription)")
+                    self.statusLine = "Drive connect failed ✗ — try again from the menu-bar icon"
+                }
+            }
+            await MainActor.run {
+                self.driveConnecting = false
+                self.onboardingWindowController?.setDriveBusy(false)
+            }
+        }
+    }
+
+    /// Resolves whether the configured backend requires a Drive connection.
+    func refreshDriveGate(force: Bool = false) async {
+        if force || pipeline.limits == nil {
+            await pipeline.refreshLimits(force: true) // internally notes errors, never throws
+        }
+        driveRequired = pipeline.limits?.storageProvider == "drive"
+        await MainActor.run {
+            onboardingWindowController?.applyDriveState(required: driveRequired, connected: settings.isDriveConnected)
         }
     }
 
@@ -333,6 +415,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func showOnboarding(initial: Bool) {
         let controller = onboardingWindowController ?? OnboardingWindowController()
         onboardingWindowController = controller
+        controller.onConnectDrive = { [weak self] in
+            self?.startDriveConnect()
+        }
+        controller.applyDriveState(required: driveRequired, connected: settings.isDriveConnected)
         controller.onStart = { [weak self] in
             guard let self else { return }
             Task { await self.notifier.requestAuthorization() }
@@ -342,6 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.monitor?.start()
             self.statusLine = "Watching the clipboard — copy any file in Finder"
         }
+        Task { [weak self] in await self?.refreshDriveGate() }
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         if initial { NSApp.activate(ignoringOtherApps: true) }
@@ -362,7 +449,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 statusLine = "Uploaded — link in Recent links"
             }
         case .failed(let message, let names):
-            statusLine = "Upload failed ✗ (\(names.first ?? "file"))"
+            if message.contains("No Google Drive") {
+                statusLine = "Connect Google Drive to upload ✗ (menu-bar icon)"
+            } else {
+                statusLine = "Upload failed ✗ (\(names.first ?? "file"))"
+            }
             NSLog("ClipLink upload failed: %@", message)
         case .ineligible(let records):
             if let first = records.first {
