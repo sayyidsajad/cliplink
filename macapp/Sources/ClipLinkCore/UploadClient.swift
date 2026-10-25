@@ -7,6 +7,9 @@ public struct ShareLimits: Codable, Sendable, Equatable {
     public let expiryHours: Double
     public let rateLimitUploads: Int?
     public let rateWindowMinutes: Int?
+    /// v0.4+ BYO storage: "drive" | "mock" | "supabase" (older backends omit).
+    public let storageProvider: String?
+    public let driveConfigured: Bool?
 }
 
 /// Successful upload response (`POST /api/v1/shares`).
@@ -25,6 +28,7 @@ public enum ClipLinkAPIError: Error, LocalizedError, Sendable {
     case tooLarge(limitBytes: Int64)
     case rateLimited(retrySeconds: Int)
     case httpsRequired
+    case driveNotConnected
     case invalidResponse(String)
     case server(status: Int, message: String)
 
@@ -42,6 +46,8 @@ public enum ClipLinkAPIError: Error, LocalizedError, Sendable {
             return "Upload rate limit reached on the server. Try again later."
         case .httpsRequired:
             return "The server requires HTTPS uploads in production."
+        case .driveNotConnected:
+            return "No Google Drive is connected yet. Open the ClipLink menu-bar icon → Connect Google Drive…"
         case .invalidResponse(let detail):
             return "Unexpected response from the backend. \(detail)"
         case .server(let status, let message):
@@ -182,10 +188,13 @@ public final class UploadClient: NSObject, @unchecked Sendable {
     }
 
     private func mapFailure(status: Int, data: Data) -> ClipLinkAPIError {
-        let message = (try? JSONDecoder().decode(APIErrorBody.self, from: data))?.error.message ?? ""
+        let body = try? JSONDecoder().decode(APIErrorBody.self, from: data)
+        let message = body?.error.message ?? ""
         switch status {
         case 413: return .tooLarge(limitBytes: 0)
         case 429: return .rateLimited(retrySeconds: 60)
+        case 403 where body?.error.code == "drive_not_connected" || message.contains("Connect Google Drive"):
+            return .driveNotConnected
         case 403 where message.contains("HTTPS"): return .httpsRequired
         default: return .server(status: status, message: message)
         }

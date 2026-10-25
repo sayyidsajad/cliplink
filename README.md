@@ -212,6 +212,23 @@ Surface points for these documents:
 - Share/error pages footer (`backend/src/page.js`);
 - App onboarding — consent checkbox **gates Start Monitoring** (v0.3.2+).
 
+## BYO storage (v0.4+)
+
+Ownership of the actual files moved to the **user**: uploads land in the
+uploader's own **Google Drive**, and the ClipLink backend (Cloudflare Worker +
+D1) keeps only share metadata plus an **AES-GCM-sealed** OAuth refresh token —
+zero file bytes ever touch the operator's infrastructure.
+
+- Onboarding has a **Connect Google Drive** step (PKCE OAuth; connection is
+  bound to the app's install id); Start Monitoring is gated on it whenever the
+  backend advertises `storageProvider: "drive"`.
+- Scope is `drive.file` — ClipLink can only ever see the files it created.
+- Downloads and short links work exactly as before: the Worker proxies the
+  bytes, enforces expiry/revocation, and the expiry cron deletes the copy in
+  **the user's** Drive — even when their Mac is offline.
+- Legacy shares (v0.3-era, Supabase-backed) keep working until they expire;
+  after that the Supabase project is retired and storage cost drops to zero.
+
 **Transparent limitations:** these documents implement a good-faith compliance
 programme (India IT Rules 2021, DPDPA 2023, DMCA-style notice handling,
 EU-consumer-law carve-outs). They **do not provide immunity** — see

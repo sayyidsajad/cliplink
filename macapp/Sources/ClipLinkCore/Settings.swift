@@ -20,6 +20,8 @@ public final class Settings: @unchecked Sendable {
         static let notifications = "cliplink.notificationsEnabled"
         static let maxUploadMB = "cliplink.maxUploadMB"
         static let blockedPatterns = "cliplink.blockedPatterns"
+        static let driveConnectionID = "cliplink.driveConnectionID"
+        static let driveEmail = "cliplink.driveEmail"
     }
 
     /// Monitoring only turns on after first-run onboarding (FR-08).
@@ -92,4 +94,22 @@ public final class Settings: @unchecked Sendable {
     public var isUsingDefaultBlockedPatterns: Bool {
         d.string(forKey: Key.blockedPatterns) == nil
     }
+
+    /// BYO storage (v0.4+): the connection id the backend handed to us after
+    /// the Google consent flow. Not a secret — it only names which row holds
+    /// the (server-side, sealed) refresh token for this install's uploads.
+    /// An empty string means "no Drive connected yet".
+    public var driveConnectionID: String {
+        get { d.string(forKey: Key.driveConnectionID) ?? "" }
+        set { d.set(newValue, forKey: Key.driveConnectionID) }
+    }
+
+    /// Display-only label of the connected Drive account (decrypted by the
+    /// backend for the owner app alone).
+    public var driveEmail: String {
+        get { d.string(forKey: Key.driveEmail) ?? "" }
+        set { d.set(newValue, forKey: Key.driveEmail) }
+    }
+
+    public var isDriveConnected: Bool { !driveConnectionID.isEmpty }
 }

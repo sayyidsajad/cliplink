@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${1:-$ROOT/build/ClipLink.app}"
 APP_NAME="ClipLink"
-VERSION="0.3.2"
+VERSION="0.4.0"
 
 # 1. Release build
 swift build -c release --package-path "$ROOT/macapp" 2>&1 | sed 's/^/  /'
