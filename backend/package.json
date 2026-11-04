@@ -11,7 +11,7 @@
     "test": "bash ../scripts/test-backend.sh"
   },
   "devDependencies": {
-    "wrangler": "^4.42.0"
+    "wrangler": "^4.157.0"
   },
   "dependencies": {
     "supabase": "^2.122.0"
